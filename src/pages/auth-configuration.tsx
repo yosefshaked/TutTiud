@@ -5,24 +5,30 @@ export const AuthConfigurationPage = () => {
     <div className="flex min-h-screen items-center justify-center bg-muted/50 p-6">
       <Card className="max-w-xl">
         <CardHeader>
-          <CardTitle>הגדרת התחברות חסרה</CardTitle>
+          <CardTitle>חסרים משתני חיבור ל־Supabase</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>נראה שהיישום לא מצא את ערכי החיבור הנדרשים של Supabase.</p>
           <p>
-            נראה כי פרטי החיבור ל־Supabase אינם מוגדרים. כדי להפעיל את המערכת יש לעדכן את
-            הקבצים <code>.env.local</code> או <code>.env</code> עם המפתחות הבאים:
+            <strong>פיתוח מקומי:</strong> ערוך/י את הקובץ <code>.env.local</code> והוסף/י בו את המשתנים
+            הנדרשים. ודא/י שהקובץ נשאר מחוץ ל-git.
+          </p>
+          <p>
+            <strong>פריסה ב-Azure Static Web Apps:</strong> היכנס/י אל <em>Azure Portal → Static Web App →
+            Configuration → Application settings</em> והוסף/י שם את אותם ערכים (או עדכן/י אותם בקובץ ה-
+            workflow ש-Azure יצר).
           </p>
           <ul className="list-disc space-y-1 pr-5">
             <li>
-              <code>VITE_SUPABASE_URL</code> – כתובת הפרויקט הראשי.
+              <code>VITE_SUPABASE_URL</code>
             </li>
             <li>
-              <code>VITE_SUPABASE_ANON_KEY</code> – מפתח אנונימי לקריאה בלבד.
+              <code>VITE_SUPABASE_ANON_KEY</code>
             </li>
           </ul>
           <p>
-            לאחר העדכון יש להפעיל מחדש את סביבת הפיתוח. ללא הגדרות אלו ניתן לגלוש בממשק אך לא
-            לבצע פעולות הדורשות התחברות.
+            לאחר שמירת הערכים הרץ/י Redeploy (או הפעל/י מחדש את שרת הפיתוח) כדי שהמערכת תיטען עם ההגדרות
+            החדשות.
           </p>
         </CardContent>
       </Card>

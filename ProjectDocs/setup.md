@@ -74,6 +74,16 @@
 4. In each tenant Supabase project, create an `app_user` role (or dedicated service role) that owns the `tuttiud` schema objects. The SQL should be executed via the Supabase SQL editor or through secure migrations.
 5. Run the TutTiud Setup Wizard after authentication to bootstrap or validate the schema.
 
+#### Azure Static Web Apps
+
+- `.env.local` is **only** for local development machines. For production deployments on Azure Static Web Apps, configure the same `VITE_*` variables inside the Azure Portal: **Static Web App → Configuration → Application settings**.
+- Alternatively, commit the variables to the generated GitHub workflow (`azure-static-web-apps.yml`) under the `env:` block so each build receives them securely.
+- Required keys:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+- After updating the values, trigger a redeploy (rerun the GitHub Action) so the build picks up the changes.
+- See the [Azure Deployment section in the README](../README.md#-azure-deployment-environment-variables) for a quick reference.
+
 ### עברית
 1. שכפל/י את קובץ הסביבה לדוגמה:
    ```bash
@@ -87,6 +97,16 @@
 3. סודות נוספים (כגון service-role) יש לשמור רק בצד השרת ולא במאגר הקוד.
 4. בכל פרויקט Supabase של דייר, צור/י משתמש `app_user` (או role ייעודי) שישמש כבעלים של עצמי סכימת `tuttiud`. הרצת ה-SQL תתבצע דרך Supabase SQL Editor או תהליך מיגרציות מאובטח.
 5. לאחר ההתחברות, הרץ/י את Setup Wizard של TutTiud כדי לאתחל או לוודא את תקינות הסכמה.
+
+#### Azure Static Web Apps
+
+- הקובץ `.env.local` מיועד **רק** לפיתוח מקומי. בפריסות Production של Azure Static Web Apps יש להזין את משתני `VITE_*` ישירות ב-Azure: **Static Web App → Configuration → Application settings**.
+- לחלופין ניתן להגדיר את הערכים בקובץ ה-Workflow ש-Azure יוצר (`azure-static-web-apps.yml`) תחת המקטע `env:` כדי שירוצו באופן מאובטח בכל Build.
+- משתנים חובה:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+- לאחר שינוי הערכים יש להריץ Redeploy (או להפעיל מחדש את ה-GitHub Action) כדי שהשינויים ייכנסו לבנייה.
+- לעיון נוסף, ראה/י את [סעיף Azure ב-README](../README.md#-azure-deployment-environment-variables) לקבלת תקציר מהיר והקשר נוסף.
 
 ## 5. Verification & Testing | בדיקה ואימות
 
