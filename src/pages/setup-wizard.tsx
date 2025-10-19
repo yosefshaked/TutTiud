@@ -104,7 +104,7 @@ export const SetupWizardPage = () => {
   useEffect(() => {
     if (!readyToStart || !selectedOrganization) return
 
-    const organizationId = selectedOrganization.organization_id
+    const orgId = selectedOrganization.org_id
 
     const runChecks = async () => {
       setInitState({ status: 'loading' })
@@ -113,7 +113,7 @@ export const SetupWizardPage = () => {
       setDiagnosticsState({ status: 'idle', diagnostics: null })
 
       try {
-        const settings = await fetchOrganizationSetupSettings(organizationId)
+        const settings = await fetchOrganizationSetupSettings(orgId)
         setOrganizationSettings(settings)
         if (!settings) {
           setInitState({
@@ -123,7 +123,7 @@ export const SetupWizardPage = () => {
           return
         }
 
-        const initResult = await initializeSetupForOrganization(organizationId)
+        const initResult = await initializeSetupForOrganization(orgId)
         setInitState({
           status: initResult.initialized ? 'success' : 'error',
           message:
@@ -147,7 +147,7 @@ export const SetupWizardPage = () => {
 
       setSchemaState({ status: 'loading', exists: null, lastBootstrappedAt: null })
       try {
-        const schemaResult = await checkSchemaStatus(organizationId)
+        const schemaResult = await checkSchemaStatus(orgId)
         setSchemaState({
           status: schemaResult.exists ? 'success' : 'warning',
           exists: schemaResult.exists,
@@ -174,7 +174,7 @@ export const SetupWizardPage = () => {
 
       setDiagnosticsState({ status: 'loading', diagnostics: null })
       try {
-        const diagnostics = await runDiagnostics(organizationId)
+        const diagnostics = await runDiagnostics(orgId)
         const severity: StepState['status'] = diagnostics
           ? diagnostics.status === 'ok'
             ? 'success'
@@ -206,7 +206,7 @@ export const SetupWizardPage = () => {
 
     setSchemaState({ status: 'loading', exists: null, lastBootstrappedAt: null })
     try {
-      const result = await runSchemaBootstrap(selectedOrganization.organization_id)
+      const result = await runSchemaBootstrap(selectedOrganization.org_id)
       setSchemaState({
         status: result.executed ? 'success' : 'error',
         exists: result.executed,
@@ -427,7 +427,7 @@ export const SetupWizardPage = () => {
               <>
                 <div>
                   <p className="font-semibold text-foreground">{selectedOrganization.organization_name}</p>
-                  <p className="text-xs text-muted-foreground">מזהה ארגון: {selectedOrganization.organization_id}</p>
+                  <p className="text-xs text-muted-foreground">מזהה ארגון: {selectedOrganization.org_id}</p>
                 </div>
                 <div className="space-y-1 rounded-md border border-muted-foreground/30 bg-muted/30 p-3">
                   <p>סטטוס ספק:</p>

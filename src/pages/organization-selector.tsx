@@ -56,16 +56,16 @@ export const OrganizationSelectorPage = () => {
           <div className="grid gap-3">
             {memberships.map((membership) => {
               const isActive =
-                membership.organization_id === selectedOrganization?.organization_id
+                membership.org_id === selectedOrganization?.org_id
               return (
                 <button
-                  key={membership.organization_id}
+                  key={membership.org_id}
                   type="button"
                   className={cn(
                     'flex w-full items-center justify-between rounded-lg border p-4 text-right transition hover:border-primary',
                     isActive ? 'border-primary bg-primary/10' : 'border-border bg-card'
                   )}
-                  onClick={() => selectOrganization(membership.organization_id)}
+                  onClick={() => selectOrganization(membership.org_id)}
                 >
                   <div className="space-y-1">
                     <p className="text-base font-semibold">{membership.organization_name}</p>

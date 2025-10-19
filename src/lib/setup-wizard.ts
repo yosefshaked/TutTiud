@@ -1,7 +1,7 @@
 import { supabaseClient } from './supabase-client'
 
 export type OrganizationSetupSettings = {
-  organization_id: string
+  org_id: string | null
   supabase_project_url: string | null
   supabase_anon_public: string | null
   last_synced_at: string | null
@@ -116,16 +116,23 @@ const normaliseSqlSnippets = (sql: unknown): DiagnosticsSqlSnippet[] => {
   return []
 }
 
+type OrgSettingsRow = {
+  org_id?: string | null
+  supabase_project_url?: string | null
+  supabase_anon_public?: string | null
+  last_synced_at?: string | null
+}
+
 export const fetchOrganizationSetupSettings = async (
-  organizationId: string
+  orgId: string
 ): Promise<OrganizationSetupSettings | null> =>
   withClient(async (client) => {
     const response = await client
       .from('org_settings')
       .select(
-        'organization_id, supabase_project_url, supabase_anon_public, last_synced_at'
+        'org_id, supabase_project_url, supabase_anon_public, last_synced_at'
       )
-      .eq('organization_id', organizationId)
+      .eq('org_id', orgId)
       .maybeSingle()
 
     if (response.error) {
@@ -135,16 +142,29 @@ export const fetchOrganizationSetupSettings = async (
       } satisfies SetupWizardError
     }
 
-    return (response.data as OrganizationSetupSettings | null) ?? null
+    if (!response.data) {
+      return null
+    }
+
+    const payload = response.data as OrgSettingsRow
+    const normalizedOrgId =
+      typeof payload.org_id === 'string' ? payload.org_id : null
+
+    return {
+      org_id: normalizedOrgId,
+      supabase_project_url: payload.supabase_project_url ?? null,
+      supabase_anon_public: payload.supabase_anon_public ?? null,
+      last_synced_at: payload.last_synced_at ?? null
+    }
   })
 
 export const initializeSetupForOrganization = async (
-  organizationId: string
+  orgId: string
 ): Promise<{ initialized: boolean; message?: string }> =>
   withClient(async (client) => {
     try {
       const { data, error } = await client.rpc('setup_assistant_initialize', {
-        organization_id: organizationId
+        org_id: orgId
       })
 
       if (error) {
@@ -174,12 +194,12 @@ export const initializeSetupForOrganization = async (
   })
 
 export const checkSchemaStatus = async (
-  organizationId: string
+  orgId: string
 ): Promise<SchemaCheckResult> =>
   withClient(async (client) => {
     try {
       const { data, error } = await client.rpc('setup_assistant_schema_status', {
-        organization_id: organizationId
+        org_id: orgId
       })
 
       if (error) {
@@ -211,12 +231,12 @@ export const checkSchemaStatus = async (
   })
 
 export const runSchemaBootstrap = async (
-  organizationId: string
+  orgId: string
 ): Promise<{ executed: boolean; message?: string }> =>
   withClient(async (client) => {
     try {
       const { data, error } = await client.rpc('setup_assistant_run_bootstrap', {
-        organization_id: organizationId
+        org_id: orgId
       })
 
       if (error) {
@@ -246,12 +266,12 @@ export const runSchemaBootstrap = async (
   })
 
 export const runDiagnostics = async (
-  organizationId: string
+  orgId: string
 ): Promise<SetupDiagnostics | null> =>
   withClient(async (client) => {
     try {
       const { data, error } = await client.rpc('setup_assistant_diagnostics', {
-        organization_id: organizationId
+        org_id: orgId
       })
 
       if (error) {

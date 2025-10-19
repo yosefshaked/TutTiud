@@ -12,7 +12,7 @@ type OrganizationContextValue = {
   memberships: OrgMembership[]
   status: OrganizationStatus
   selectedOrganization: OrgMembership | null
-  selectOrganization: (organizationId: string | null) => void
+  selectOrganization: (orgId: string | null) => void
   error: string | null
   refresh: () => Promise<void>
 }
@@ -22,6 +22,12 @@ const OrganizationContext = createContext<OrganizationContextValue | undefined>(
 )
 
 const STORAGE_KEY = 'tuttiud.selectedOrganization'
+
+type SupabaseOrgMembershipRow = {
+  org_id?: string | null
+  organization_name?: string | null
+  role?: string | null
+}
 
 export const OrganizationProvider = ({
   children
@@ -48,18 +54,29 @@ export const OrganizationProvider = ({
       setStatus('loading')
       const { data, error: queryError } = await supabaseClient
         .from('org_memberships')
-        .select('organization_id, organization_name, role')
+        .select('org_id, organization_name, role')
         .eq('user_id', user.id)
 
       if (queryError) {
         throw queryError
       }
 
-      const normalized = (data ?? []).map((membership) => ({
-        organization_id: membership.organization_id,
-        organization_name: membership.organization_name ?? 'ארגון ללא שם',
-        role: (membership.role as OrgMembership['role']) ?? 'member'
-      }))
+      const normalized = ((data ?? []) as SupabaseOrgMembershipRow[])
+        .map((membership) => {
+          const orgId = membership.org_id ?? null
+
+          if (!orgId) {
+            return null
+          }
+
+          return {
+            org_id: orgId,
+            organization_name:
+              membership.organization_name ?? 'ארגון ללא שם',
+            role: (membership.role as OrgMembership['role']) ?? 'member'
+          }
+        })
+        .filter((membership): membership is OrgMembership => Boolean(membership))
 
       setMemberships(normalized)
       setStatus(normalized.length === 0 ? 'empty' : 'ready')
@@ -69,10 +86,10 @@ export const OrganizationProvider = ({
         if (normalized.length === 0) {
           return null
         }
-        if (previousOrgId && normalized.some((m) => m.organization_id === previousOrgId)) {
+        if (previousOrgId && normalized.some((m) => m.org_id === previousOrgId)) {
           return previousOrgId
         }
-        return normalized[0]?.organization_id ?? null
+        return normalized[0]?.org_id ?? null
       })
     } catch (loadError) {
       console.error('Failed to load organization memberships', loadError)
@@ -95,12 +112,12 @@ export const OrganizationProvider = ({
 
   const selectedOrganization = useMemo(() => {
     if (!storedOrgId) return null
-    return memberships.find((org) => org.organization_id === storedOrgId) ?? null
+    return memberships.find((org) => org.org_id === storedOrgId) ?? null
   }, [memberships, storedOrgId])
 
   const selectOrganization = useCallback<OrganizationContextValue['selectOrganization']>(
-    (organizationId) => {
-      setStoredOrgId(organizationId)
+    (orgId) => {
+      setStoredOrgId(orgId)
     },
     [setStoredOrgId]
   )
