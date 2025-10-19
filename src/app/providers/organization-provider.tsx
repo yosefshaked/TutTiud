@@ -25,7 +25,9 @@ const STORAGE_KEY = 'tuttiud.selectedOrganization'
 
 type SupabaseOrgMembershipRow = {
   org_id?: string | null
-  organization_name?: string | null
+  organizations?: {
+    name?: string | null
+  } | null
   role?: string | null
 }
 
@@ -54,7 +56,7 @@ export const OrganizationProvider = ({
       setStatus('loading')
       const { data, error: queryError } = await supabaseClient
         .from('org_memberships')
-        .select('org_id, organization_name, role')
+        .select('org_id, role, organizations(name)')
         .eq('user_id', user.id)
 
       if (queryError) {
@@ -72,7 +74,7 @@ export const OrganizationProvider = ({
           return {
             org_id: orgId,
             organization_name:
-              membership.organization_name ?? 'ארגון ללא שם',
+              membership.organizations?.name ?? 'ארגון ללא שם',
             role: (membership.role as OrgMembership['role']) ?? 'member'
           }
         })
