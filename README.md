@@ -62,6 +62,7 @@ src/
 ## Documentation
 
 - מסמכי תהליך ורקע נוספים זמינים תחת התיקייה `ProjectDocs/` (עברית ואנגלית).
+- מדריך הקמה מלא (Setup) זמין בקובץ [`ProjectDocs/setup.md`](ProjectDocs/setup.md) וכולל הוראות מפורטות באנגלית ועברית לפריסה ותחזוקה.
 - הנחיות עבור סוכני AI זמינות בקובץ `AGENTS.md` בשורש המאגר.
 
 ## License
