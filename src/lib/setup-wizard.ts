@@ -250,9 +250,11 @@ export const initializeSetupForOrganization = async (
 ): Promise<{ initialized: boolean; message?: string }> =>
   withClient(async (client) => {
     try {
-      const { data, error } = await client.rpc('tuttiud.setup_assistant_initialize', {
-        org_id: orgId
-      })
+      const { data, error } = await client
+        .schema('tuttiud')
+        .rpc('setup_assistant_initialize', {
+          org_id: orgId
+        })
 
       if (error) {
         throw error
