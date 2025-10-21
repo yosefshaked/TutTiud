@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
 import { AuthProvider } from './providers/auth-provider'
@@ -15,30 +16,34 @@ import { SetupWizardPage } from '@/pages/setup-wizard'
 import { StudentsPage } from '@/pages/students'
 import { BackupPage } from '@/pages/backup'
 
+const queryClient = new QueryClient()
+
 export const App = () => {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <OrganizationProvider>
-          <Routes>
-            <Route path="/auth/login" element={<AuthLoginPage />} />
-            <Route path="/auth/configuration" element={<AuthConfigurationPage />} />
-            <Route element={<RequireAuth />}>
-              <Route path="/auth/select-organization" element={<OrganizationSelectorPage />} />
-              <Route element={<RequireOrganization />}>
-                <Route element={<AppShell />}>
-                  <Route index element={<LandingPage />} />
-                  <Route path="setup-wizard" element={<SetupWizardPage />} />
-                  <Route path="students" element={<StudentsPage />} />
-                  <Route path="session-records/new" element={<SessionRecordCreatePage />} />
-                  <Route path="admin/backup" element={<BackupPage />} />
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <AuthProvider>
+          <OrganizationProvider>
+            <Routes>
+              <Route path="/auth/login" element={<AuthLoginPage />} />
+              <Route path="/auth/configuration" element={<AuthConfigurationPage />} />
+              <Route element={<RequireAuth />}> 
+                <Route path="/auth/select-organization" element={<OrganizationSelectorPage />} />
+                <Route element={<RequireOrganization />}> 
+                  <Route element={<AppShell />}>
+                    <Route index element={<LandingPage />} />
+                    <Route path="setup-wizard" element={<SetupWizardPage />} />
+                    <Route path="students" element={<StudentsPage />} />
+                    <Route path="session-records/new" element={<SessionRecordCreatePage />} />
+                    <Route path="admin/backup" element={<BackupPage />} />
+                  </Route>
                 </Route>
               </Route>
-            </Route>
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </OrganizationProvider>
-      </AuthProvider>
-    </BrowserRouter>
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </OrganizationProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
   )
 }

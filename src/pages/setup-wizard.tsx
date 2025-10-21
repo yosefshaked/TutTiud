@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -281,12 +282,26 @@ export const SetupWizardPage = () => {
   const [appKeyInput, setAppKeyInput] = useState('')
   const [appKeyState, setAppKeyState] = useState<StepState>({ status: 'idle' })
   const [validationTrigger, setValidationTrigger] = useState<'auto' | 'manual' | null>(null)
-  const lastSettingsFetchRef = useRef<{ orgId: string; refreshToken: number } | null>(null)
 
   const readyToStart = useMemo(
     () => clientAvailable && organizationStatus === 'ready' && Boolean(selectedOrganization),
     [clientAvailable, organizationStatus, selectedOrganization]
   )
+
+  const organizationId = selectedOrganization?.org_id ?? null
+
+  const settingsQuery = useQuery<OrganizationSetupSettings | null, SetupWizardError>({
+    queryKey: ['setup-wizard', 'organization-settings', organizationId, refreshToken],
+    queryFn: () => fetchOrganizationSetupSettings(organizationId!),
+    enabled: readyToStart && Boolean(organizationId),
+    refetchOnWindowFocus: false
+  })
+
+  useEffect(() => {
+    if (!selectedOrganization) {
+      setOrganizationSettings(null)
+    }
+  }, [selectedOrganization])
 
   const tuttiudStatus = organizationSettings?.metadata.connections.tuttiud ?? null
   const hasStoredAppKey = Boolean(organizationSettings?.metadata.credentials.tuttiudAppJwt)
@@ -375,118 +390,101 @@ export const SetupWizardPage = () => {
   useEffect(() => {
     if (!readyToStart || !selectedOrganization) return
 
-    // Prevent automatic browser focus events from re-triggering the fetch and
-    // resetting the wizard once we've already loaded the current organization.
-    const fetchKey = {
-      orgId: selectedOrganization.org_id,
-      refreshToken
+    if (settingsQuery.isFetching) {
+      setPreparationDetails(null)
+      setCopyStatus('idle')
     }
+  }, [readyToStart, selectedOrganization, settingsQuery.isFetching])
 
-    const previousFetch = lastSettingsFetchRef.current
-    if (
-      previousFetch &&
-      previousFetch.orgId === fetchKey.orgId &&
-      previousFetch.refreshToken === fetchKey.refreshToken
-    ) {
+  useEffect(() => {
+    if (!readyToStart || !selectedOrganization) return
+
+    if (settingsQuery.isError) {
+      const fetchError = settingsQuery.error
+      setOrganizationSettings(null)
+      setInitState({
+        status: 'error',
+        message:
+          fetchError.message ?? 'טעינת הגדרות הארגון נכשלה. נסו שוב בעוד רגע.',
+        error: formatTechnicalDetails(fetchError.cause)
+      })
       return
     }
 
-    lastSettingsFetchRef.current = fetchKey
-
-    let isActive = true
-    const orgId = selectedOrganization.org_id
-
-    const loadSettings = async () => {
-      setPreparationDetails(null)
-      setCopyStatus('idle')
-
-      try {
-        const settings = await fetchOrganizationSetupSettings(orgId)
-        if (!isActive) return
-
-        setOrganizationSettings(settings)
-
-        if (!settings) {
-          requireManualPreparation({
-            status: 'warning',
-            message:
-              'לא הצלחנו למצוא את הגדרות החיבור של הארגון. אנא צרו קשר עם התמיכה של TutTiud.',
-            error: undefined
-          })
-          setAppKeyInput('')
-          setAppKeyState({ status: 'idle' })
-          setInitState({
-            status: 'warning',
-            message: 'לא הצלחנו למצוא את הגדרות החיבור של הארגון. אנא צרו קשר עם התמיכה של TutTiud.',
-            error: undefined
-          })
-          return
-        }
-
-        const storedKey = settings.metadata.credentials.tuttiudAppJwt ?? ''
-        setAppKeyInput(storedKey)
-
-        if (storedKey) {
-          setAppKeyState((previous) =>
-            previous.status === 'error'
-              ? previous
-              : {
-                  status: 'success',
-                  message: 'מפתח היישום נשמר. ניתן לעבור לבדיקה בשלב הבא.',
-                  error: undefined
-                }
-          )
-        } else {
-          setAppKeyState((previous) =>
-            previous.status === 'error' ? previous : { status: 'idle', error: undefined }
-          )
-        }
-
-        if (settings.metadata.connections.tuttiud === 'connected') {
-          markPreparationSatisfied('החיבור למסד הנתונים כבר פעיל. נריץ בדיקות לוודא שהכל תקין.')
-          setInitState({
-            status: 'success',
-            message: 'החיבור למסד הנתונים כבר פעיל. נריץ בדיקות לוודא שהכל תקין.',
-            error: undefined
-          })
-          setValidationTrigger((current) => current ?? 'auto')
-        } else {
-          requireManualPreparation({
-            status: 'idle',
-            message:
-              'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
-            error: undefined
-          })
-          setInitState({
-            status: 'idle',
-            message:
-              'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
-            error: undefined
-          })
-        }
-      } catch (error) {
-        if (!isActive) return
-        const fetchError = error as SetupWizardError
-        setInitState({
-          status: 'error',
-          message:
-            fetchError.message ?? 'טעינת הגדרות הארגון נכשלה. נסו שוב בעוד רגע.',
-          error: formatTechnicalDetails(fetchError.cause)
-        })
-      }
+    if (!settingsQuery.isSuccess) {
+      return
     }
 
-    void loadSettings()
+    const settings = settingsQuery.data ?? null
+    setOrganizationSettings(settings)
 
-    return () => {
-      isActive = false
+    if (!settings) {
+      requireManualPreparation({
+        status: 'warning',
+        message:
+          'לא הצלחנו למצוא את הגדרות החיבור של הארגון. אנא צרו קשר עם התמיכה של TutTiud.',
+        error: undefined
+      })
+      setAppKeyInput('')
+      setAppKeyState({ status: 'idle' })
+      setInitState({
+        status: 'warning',
+        message: 'לא הצלחנו למצוא את הגדרות החיבור של הארגון. אנא צרו קשר עם התמיכה של TutTiud.',
+        error: undefined
+      })
+      return
+    }
+
+    const storedKey = settings.metadata.credentials.tuttiudAppJwt ?? ''
+    setAppKeyInput(storedKey)
+
+    if (storedKey) {
+      setAppKeyState((previous) =>
+        previous.status === 'error'
+          ? previous
+          : {
+              status: 'success',
+              message: 'מפתח היישום נשמר. ניתן לעבור לבדיקה בשלב הבא.',
+              error: undefined
+            }
+      )
+    } else {
+      setAppKeyState((previous) =>
+        previous.status === 'error' ? previous : { status: 'idle', error: undefined }
+      )
+    }
+
+    if (settings.metadata.connections.tuttiud === 'connected') {
+      markPreparationSatisfied('החיבור למסד הנתונים כבר פעיל. נריץ בדיקות לוודא שהכל תקין.')
+      setInitState({
+        status: 'success',
+        message: 'החיבור למסד הנתונים כבר פעיל. נריץ בדיקות לוודא שהכל תקין.',
+        error: undefined
+      })
+      setValidationTrigger((current) => current ?? 'auto')
+    } else {
+      requireManualPreparation({
+        status: 'idle',
+        message:
+          'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
+        error: undefined
+      })
+      setInitState({
+        status: 'idle',
+        message:
+          'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
+        error: undefined
+      })
     }
   }, [
     markPreparationSatisfied,
     readyToStart,
-    refreshToken,
     requireManualPreparation,
-    selectedOrganization
+    selectedOrganization,
+    settingsQuery.data,
+    settingsQuery.error,
+    settingsQuery.isError,
+    settingsQuery.isSuccess
   ])
 
   const runValidation = useCallback(
