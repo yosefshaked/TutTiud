@@ -46,7 +46,7 @@ jobs:
 
           action: "upload"
           app_location: "/"         # תיקיית קוד המקור
-          api_location: ""          # לא רלוונטי כרגע
+          api_location: "api"       # תיקיית Azure Functions
           output_location: "dist"   # תיקיית פלט של Vite
           github_id_token: ${{ steps.idtoken.outputs.result }}
         env:
