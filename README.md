@@ -66,12 +66,12 @@ src/
 
 ## אשף ההקמה (Setup Wizard)
 
-- בעמוד `Setup Wizard` המערכת טוענת את ההגדרות מטבלת `org_settings`, בודקת את סטטוס החיבור (`metadata.connections.tuttiud`) ומפעילה בדיקת Pre-flight על ידי קריאה ל-`tuttiud.setup_assistant_initialize`.
-- אם פונקציית ה-Setup אינה קיימת, מוצג שלב מודרך חדש – "שלב 0" – הכולל הסבר בעברית, סקריפט SQL מלא, כפתור העתקה והנחיות להרצה ב-Supabase. לאחר הרצת הסקריפט המשתמש יכול ללחוץ "הרצתי את הסקריפט" כדי להמשיך.
-- כאשר הבדיקה הראשונית מצליחה (או אם הסטטוס כבר `"connected"`), האשף ממשיך לשלבים הרגילים: אימות מבנה (`setup_assistant_schema_status`), יצירת סכימה (`setup_assistant_run_bootstrap`) והרצת דיאגנוסטיקה (`setup_assistant_diagnostics`) עם מסרים ידידותיים למשתמש.
-- כל הפונקציות רצות דרך Supabase RPC ולכן לא נדרש חשיפת מפתחות רגישים ב-Front-End. יש להגדיר אותן בצד השרת עם הרשאות מתאימות.
-- מסך בחירת הארגון בודק את הערך `metadata.connections.tuttiud` ב־`org_settings` ומפנה אוטומטית לאשף אם הסטטוס שונה מ־`"connected"` או אינו קיים, אחרת מחזיר לנתיב המקורי.
-- לאחר שכל שלבי האשף הושלמו בהצלחה, סטטוס החיבור מתעדכן אוטומטית ל־`"connected"` בשדה המטא־דאטה של הארגון.
+- בעמוד `Setup Wizard` נטענות הגדרות הארגון מטבלת `org_settings`, כולל סטטוס החיבור (`metadata.connections.tuttiud`) והמפתח הייעודי (`metadata.credentials.tuttiudAppJwt`), כדי להבין אם נדרשת הכנה ידנית.
+- ארגון שלא סומן כ־`"connected"` מקבל מסלול מודרך: שלב 1 מסביר כיצד לחשוף את סכימת tuttiud דרך Settings → API, מציג את סקריפט ההכנה הרשמי (גרסה 2.1) עם כפתור העתקה ומפרט את השלבים להרצה ב-Supabase.
+- שלב 2 אוסף את הערך `APP_DEDICATED_KEY` שנוצר בסוף הסקריפט, שומר אותו במטא־דאטה של הארגון ומוודא שהמפתח קיים לפני כל בדיקה.
+- שלב 3 נשלט בידי המשתמש: רק לאחר לחיצה על "בדיקת החיבור" מתבצעת קריאה ל-`tuttiud.setup_assistant_initialize`. אם המערכת כבר מסומנת כ־`"connected"`, האשף מדלג על ההתחול וממשיך הלאה.
+- שלב 4 ו־שלב 5 נשארו אוטומטיים: אימות מבנה (`setup_assistant_schema_status`) עם אפשרות להריץ `setup_assistant_run_bootstrap`, ולבסוף דיאגנוסטיקה (`setup_assistant_diagnostics`) עם הנחיות ידידותיות.
+- מסך בחירת הארגון מפנה לאשף כאשר הסטטוס אינו `"connected"`, והאשף מעדכן את המטא־דאטה באמצעות `updateTuttiudConnectionStatus` לאחר שכל השלבים עוברים בהצלחה.
 
 ## Documentation
 

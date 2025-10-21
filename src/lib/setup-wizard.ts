@@ -10,8 +10,14 @@ export type OrganizationConnectionsMetadata = {
   [key: string]: unknown
 }
 
+export type OrganizationCredentialsMetadata = {
+  tuttiudAppJwt: string | null
+  [key: string]: unknown
+}
+
 export type OrganizationSetupMetadata = {
   connections: OrganizationConnectionsMetadata
+  credentials: OrganizationCredentialsMetadata
   raw: Record<string, unknown>
 }
 
@@ -149,12 +155,19 @@ const normaliseMetadata = (
       connections: {
         tuttiud: null
       },
+      credentials: {
+        tuttiudAppJwt: null
+      },
       raw: {}
     }
   }
 
   const connectionsSource = isRecord(metadata.connections)
     ? (metadata.connections as Record<string, unknown>)
+    : {}
+
+  const credentialsSource = isRecord(metadata.credentials)
+    ? (metadata.credentials as Record<string, unknown>)
     : {}
 
   const tuttiudValue = connectionsSource.tuttiud
@@ -166,13 +179,29 @@ const normaliseMetadata = (
     tuttiud: normalizedTuttiud
   }
 
+  const tuttiudAppJwtValue = credentialsSource.tuttiudAppJwt
+  const normalizedTuttiudAppJwt =
+    typeof tuttiudAppJwtValue === 'string' && tuttiudAppJwtValue.trim().length > 0
+      ? tuttiudAppJwtValue
+      : null
+
+  const normalizedCredentials: OrganizationCredentialsMetadata = {
+    ...credentialsSource,
+    tuttiudAppJwt: normalizedTuttiudAppJwt
+  }
+
   return {
     connections: normalizedConnections,
+    credentials: normalizedCredentials,
     raw: {
       ...metadata,
       connections: {
         ...connectionsSource,
         tuttiud: normalizedTuttiud
+      },
+      credentials: {
+        ...credentialsSource,
+        tuttiudAppJwt: normalizedTuttiudAppJwt
       }
     }
   }
@@ -228,7 +257,10 @@ export const updateTuttiudConnectionStatus = async (
       connections: {
         ...existingConnections,
         tuttiud: status
-      }
+      },
+      credentials: isRecord(current.raw.credentials)
+        ? (current.raw.credentials as Record<string, unknown>)
+        : {}
     }
 
     const { error } = await client
@@ -239,6 +271,47 @@ export const updateTuttiudConnectionStatus = async (
     if (error) {
       throw {
         message: 'עדכון סטטוס החיבור של TutTiud נכשל. אנא נסה שוב מאוחר יותר.',
+        cause: error
+      } satisfies SetupWizardError
+    }
+
+    return normaliseMetadata(nextRaw)
+  })
+
+export const saveTuttiudAppKey = async (
+  orgId: string,
+  appKey: string,
+  options?: { currentMetadata?: Record<string, unknown> | null }
+): Promise<OrganizationSetupMetadata> =>
+  withClient(async (client) => {
+    const current = normaliseMetadata(options?.currentMetadata ?? null)
+    const existingConnections = isRecord(current.raw.connections)
+      ? (current.raw.connections as Record<string, unknown>)
+      : {}
+    const existingCredentials = isRecord(current.raw.credentials)
+      ? (current.raw.credentials as Record<string, unknown>)
+      : {}
+
+    const nextRaw: Record<string, unknown> = {
+      ...current.raw,
+      connections: {
+        ...existingConnections,
+        tuttiud: current.connections.tuttiud
+      },
+      credentials: {
+        ...existingCredentials,
+        tuttiudAppJwt: appKey
+      }
+    }
+
+    const { error } = await client
+      .from('org_settings')
+      .update({ metadata: nextRaw })
+      .eq('org_id', orgId)
+
+    if (error) {
+      throw {
+        message: 'לא הצלחנו לשמור את מפתח היישום. בדקו את החיבור ל-Supabase ונסו שוב.',
         cause: error
       } satisfies SetupWizardError
     }

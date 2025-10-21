@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
 import { useAuth } from '@/app/providers/auth-provider'
 import { useOrganization } from '@/app/providers/organization-provider'
 import {
@@ -15,6 +16,7 @@ import {
   type OrganizationSetupSettings,
   type SetupDiagnostics,
   type SetupWizardError,
+  saveTuttiudAppKey,
   updateTuttiudConnectionStatus
 } from '@/lib/setup-wizard'
 
@@ -33,33 +35,159 @@ const issueTypeLabel: Record<string, string> = {
   other: 'פריטים נוספים'
 }
 
-const DATABASE_PREPARATION_SQL = `-- Tuttiud Platform Setup Script V1.0
+const DATABASE_PREPARATION_SQL = `-- =================================================================
+-- Tuttiud Platform Setup Script V2.1 (MVP Refined)
+-- =================================================================
+-- This script prepares a Supabase database for use with the Tuttiud platform.
+-- It creates a dedicated 'tuttiud' schema, required tables, security policies,
+-- and a diagnostics function.
+--
+-- INSTRUCTIONS:
+-- 1. Run this entire script in your Supabase SQL Editor.
+-- 2. At the end, it will generate a long string (JWT). Copy this key.
+-- 3. Paste the key back into the Tuttiud Setup Wizard.
+--
+-- IMPORTANT: Replace 'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' at the
+-- bottom of the script with the actual JWT secret from your Supabase
+-- project (Settings -> API -> JWT Secret).
+-- =================================================================
 
--- 1. Create the application-specific schema
+-- Part 1: Extensions and Schema Creation
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pgjwt" WITH SCHEMA extensions;
 CREATE SCHEMA IF NOT EXISTS tuttiud;
 
--- 2. Create the setup assistant function
--- This function performs initial bootstrapping inside your database.
-CREATE OR REPLACE FUNCTION tuttiud.setup_assistant_initialize(org_id uuid)
-RETURNS void
-LANGUAGE plpgsql
--- SECURITY DEFINER is required to allow the function to perform
--- administrative tasks like creating tables on behalf of the application.
-SECURITY DEFINER AS $$
+-- Part 2: Table Creation within 'tuttiud' schema (MVP Focus)
+
+-- Instructors Table
+CREATE TABLE IF NOT EXISTS tuttiud."Instructors" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  "name" text NOT NULL,
+  "email" text,
+  "phone" text,
+  "is_active" boolean DEFAULT true,
+  "notes" text,
+  "metadata" jsonb
+);
+
+-- Students Table
+CREATE TABLE IF NOT EXISTS tuttiud."Students" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  "name" text NOT NULL,
+  "contact_info" text, -- Phone or Email
+  "assigned_instructor_id" uuid REFERENCES tuttiud."Instructors"("id"),
+  "tags" text[], -- For "belongs to" / health-fund
+  "notes" text,
+  "metadata" jsonb
+);
+
+-- Session Records Table
+CREATE TABLE IF NOT EXISTS tuttiud."SessionRecords" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  "date" date NOT NULL,
+  "student_id" uuid NOT NULL REFERENCES tuttiud."Students"("id"),
+  "instructor_id" uuid REFERENCES tuttiud."Instructors"("id"),
+  "service_context" text, -- Optional context for the session (replaces Services table)
+  "content" text,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz DEFAULT now(),
+  "deleted" boolean NOT NULL DEFAULT false,
+  "deleted_at" timestamptz,
+  "metadata" jsonb
+);
+
+-- Settings Table (For future use, e.g., backup configuration)
+CREATE TABLE IF NOT EXISTS tuttiud."Settings" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  "key" text NOT NULL UNIQUE,
+  "settings_value" jsonb NOT NULL
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS "SessionRecords_student_date_idx" ON tuttiud."SessionRecords" ("student_id", "date");
+CREATE INDEX IF NOT EXISTS "SessionRecords_instructor_idx" ON tuttiud."SessionRecords" ("instructor_id");
+
+-- Part 3: Row Level Security (RLS) Setup
+
+-- Enable RLS on all tables
+ALTER TABLE tuttiud."Instructors" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tuttiud."Students" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tuttiud."SessionRecords" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tuttiud."Settings" ENABLE ROW LEVEL SECURITY;
+
+-- Policies: Allow full access for authenticated users.
+-- The application logic will be responsible for filtering records based on user roles (e.g., member sees only their students).
+CREATE POLICY "Allow full access to authenticated users on Instructors" ON tuttiud."Instructors" FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Allow full access to authenticated users on Students" ON tuttiud."Students" FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Allow full access to authenticated users on SessionRecords" ON tuttiud."SessionRecords" FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Allow full access to authenticated users on Settings" ON tuttiud."Settings" FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- Part 4: Application Role and Permissions
+
+-- Create the dedicated, non-login role for the application
+DO $$
 BEGIN
-  -- Bootstrapping logic, e.g., creating initial tables.
-  CREATE TABLE IF NOT EXISTS tuttiud.projects (
-    id bigserial PRIMARY KEY,
-    name text NOT NULL,
-    organization_id uuid DEFAULT org_id,
-    created_at timestamptz DEFAULT now()
-  );
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
+    CREATE ROLE app_user;
+  END IF;
+END
+$$;
 
-  -- Add any other platform-required tables or settings here in the future.
+-- Grant permissions to the app_user role on the 'tuttiud' schema
+GRANT USAGE ON SCHEMA tuttiud TO app_user;
+GRANT ALL ON ALL TABLES IN SCHEMA tuttiud TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA tuttiud GRANT ALL ON TABLES TO app_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA tuttiud TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA tuttiud GRANT USAGE, SELECT ON SEQUENCES TO app_user;
 
-  RAISE NOTICE 'Tuttiud setup for org_id % completed successfully.', org_id;
+-- Allow standard roles to switch to the app_user role
+GRANT app_user TO postgres, authenticated, anon;
+
+-- Part 5: Diagnostics Function
+
+CREATE OR REPLACE FUNCTION tuttiud.setup_assistant_diagnostics()
+RETURNS TABLE (check_name text, success boolean, details text)
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+  required_tables constant text[] := array['Instructors', 'Students', 'SessionRecords', 'Settings'];
+  table_name text;
+  table_exists boolean;
+BEGIN
+  -- Check for 'tuttiud' schema
+  success := EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'tuttiud');
+  check_name := 'Schema "tuttiud" exists';
+  details := CASE WHEN success THEN 'OK' ELSE 'Schema "tuttiud" not found.' END;
+  RETURN NEXT;
+
+  -- Check for 'app_user' role
+  success := EXISTS(SELECT 1 FROM pg_roles WHERE rolname = 'app_user');
+  check_name := 'Role "app_user" exists';
+  details := CASE WHEN success THEN 'OK' ELSE 'Role "app_user" not found.' END;
+  RETURN NEXT;
+
+  -- Check for all required tables
+  FOREACH table_name IN ARRAY required_tables LOOP
+    success := to_regclass('tuttiud.' || quote_ident(table_name)) IS NOT NULL;
+    check_name := 'Table "' || table_name || '" exists';
+    details := CASE WHEN success THEN 'OK' ELSE 'Table ' || table_name || ' is missing.' END;
+    RETURN NEXT;
+  END LOOP;
 END;
-$$;`
+$$;
+
+
+-- Part 6: Generate the Application-Specific JWT
+
+-- IMPORTANT: Replace with your actual JWT secret from Supabase settings.
+SELECT extensions.sign(
+  json_build_object(
+    'role', 'app_user',
+    'exp', (EXTRACT(EPOCH FROM (NOW() + INTERVAL '5 year')))::integer,
+    'iat', (EXTRACT(EPOCH FROM NOW()))::integer
+  ),
+  'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE'
+) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";`
 
 const formatTechnicalDetails = (cause: unknown): string | null => {
   if (!cause) return null
@@ -167,23 +295,127 @@ export const SetupWizardPage = () => {
   const [needsPreparation, setNeedsPreparation] = useState(false)
   const [preparationDetails, setPreparationDetails] = useState<string | null>(null)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [appKeyInput, setAppKeyInput] = useState('')
+  const [appKeyState, setAppKeyState] = useState<StepState>({ status: 'idle' })
+  const [validationTrigger, setValidationTrigger] = useState<'auto' | 'manual' | null>(null)
 
   const readyToStart = useMemo(
     () => clientAvailable && organizationStatus === 'ready' && Boolean(selectedOrganization),
     [clientAvailable, organizationStatus, selectedOrganization]
   )
 
+  const tuttiudStatus = organizationSettings?.metadata.connections.tuttiud ?? null
+  const hasStoredAppKey = Boolean(organizationSettings?.metadata.credentials.tuttiudAppJwt)
+  const shouldShowPreparationGuide = needsPreparation
+  const shouldShowAppKeyStep = shouldShowPreparationGuide || !hasStoredAppKey
+  const diagnosticsSeverity = diagnosticsState.diagnostics?.status ?? null
+  const diagnosticsIssues = diagnosticsState.diagnostics?.issues ?? []
+  const diagnosticsSql = diagnosticsState.diagnostics?.sqlSnippets ?? []
+  const isValidationLoading = initState.status === 'loading'
+  const canRequestValidation =
+    Boolean(selectedOrganization && organizationSettings) &&
+    (tuttiudStatus === 'connected' || hasStoredAppKey)
+  const isSettingsLoaded = Boolean(organizationSettings)
+  const isConnectionUpdateLoading = connectionUpdateState.status === 'loading'
+
   useEffect(() => {
     if (!readyToStart || !selectedOrganization) return
 
+    let isActive = true
     const orgId = selectedOrganization.org_id
 
-    const runChecks = async () => {
-      setNeedsPreparation(false)
+    const loadSettings = async () => {
       setPreparationDetails(null)
       setCopyStatus('idle')
-      setInitState({ status: 'loading' })
-      setOrganizationSettings(null)
+
+      try {
+        const settings = await fetchOrganizationSetupSettings(orgId)
+        if (!isActive) return
+
+        setOrganizationSettings(settings)
+
+        if (!settings) {
+          setNeedsPreparation(true)
+          setAppKeyInput('')
+          setAppKeyState({ status: 'idle' })
+          setInitState({
+            status: 'warning',
+            message: 'לא הצלחנו למצוא את הגדרות החיבור של הארגון. אנא צרו קשר עם התמיכה של TutTiud.',
+            error: undefined
+          })
+          return
+        }
+
+        const storedKey = settings.metadata.credentials.tuttiudAppJwt ?? ''
+        setAppKeyInput(storedKey)
+
+        if (storedKey) {
+          setAppKeyState((previous) =>
+            previous.status === 'error'
+              ? previous
+              : {
+                  status: 'success',
+                  message: 'מפתח היישום נשמר. ניתן לעבור לבדיקה בשלב הבא.',
+                  error: undefined
+                }
+          )
+        } else {
+          setAppKeyState((previous) =>
+            previous.status === 'error' ? previous : { status: 'idle', error: undefined }
+          )
+        }
+
+        if (settings.metadata.connections.tuttiud === 'connected') {
+          setNeedsPreparation(false)
+          setInitState({
+            status: 'success',
+            message: 'החיבור למסד הנתונים כבר פעיל. נריץ בדיקות לוודא שהכל תקין.',
+            error: undefined
+          })
+          setValidationTrigger((current) => current ?? 'auto')
+        } else {
+          setNeedsPreparation(true)
+          setInitState({
+            status: 'idle',
+            message:
+              'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 1 והזינו את מפתח היישום בשלב 2.',
+            error: undefined
+          })
+        }
+      } catch (error) {
+        if (!isActive) return
+        const fetchError = error as SetupWizardError
+        setInitState({
+          status: 'error',
+          message:
+            fetchError.message ?? 'טעינת הגדרות הארגון נכשלה. נסו שוב בעוד רגע.',
+          error: formatTechnicalDetails(fetchError.cause)
+        })
+      }
+    }
+
+    void loadSettings()
+
+    return () => {
+      isActive = false
+    }
+  }, [readyToStart, selectedOrganization, refreshToken])
+
+  const runValidation = useCallback(
+    async (origin: 'auto' | 'manual') => {
+      if (!selectedOrganization) return
+
+      const orgId = selectedOrganization.org_id
+
+      setPreparationDetails(null)
+      setInitState({
+        status: 'loading',
+        message:
+          origin === 'auto'
+            ? 'מוודאים שהחיבור למסד הנתונים עדיין פעיל...'
+            : 'בודקים את החיבור למסד הנתונים...',
+        error: undefined
+      })
       setSchemaState({ status: 'idle', exists: null, lastBootstrappedAt: null })
       setDiagnosticsState({ status: 'idle', diagnostics: null })
       setConnectionUpdateState({ status: 'idle' })
@@ -191,46 +423,100 @@ export const SetupWizardPage = () => {
       try {
         const settings = await fetchOrganizationSetupSettings(orgId)
         setOrganizationSettings(settings)
+
         if (!settings) {
+          setNeedsPreparation(true)
+          setAppKeyState({ status: 'idle' })
           setInitState({
             status: 'warning',
-            message: 'לא הצלחנו למצוא את הגדרות החיבור של הארגון. אנא צרו קשר עם התמיכה של TutTiud.'
+            message: 'לא נמצאו הגדרות חיבור לארגון. פנו לתמיכת TutTiud להמשך טיפול.',
+            error: undefined
           })
           return
         }
 
-        if (settings.metadata.connections.tuttiud === 'connected') {
+        const storedKey = settings.metadata.credentials.tuttiudAppJwt ?? ''
+        const isAlreadyConnected = settings.metadata.connections.tuttiud === 'connected'
+
+        setAppKeyInput(storedKey)
+
+        if (storedKey) {
+          setAppKeyState((previous) =>
+            previous.status === 'error'
+              ? previous
+              : {
+                  status: 'success',
+                  message: 'מפתח היישום נשמר. ממשיכים לבדיקה.',
+                  error: undefined
+                }
+          )
+        } else if (!isAlreadyConnected) {
+          setNeedsPreparation(true)
+          setAppKeyState({
+            status: 'error',
+            message: 'הדביקו ושמרו את מפתח APP_DEDICATED_KEY לפני בדיקת החיבור.',
+            error: undefined
+          })
+          setInitState({
+            status: 'error',
+            message: 'חסר מפתח יישום. השלימו את שלב 2 ונסו שוב.',
+            error: undefined
+          })
+          return
+        }
+
+        if (isAlreadyConnected) {
+          setNeedsPreparation(false)
           setInitState({
             status: 'success',
-            message: 'החיבור למסד הנתונים כבר פעיל. נוודא שהכל עדיין תקין.'
+            message: 'החיבור כבר אושר בעבר. נמשיך לבדיקות משלימות.',
+            error: undefined
           })
         } else {
-          const initResult = await initializeSetupForOrganization(orgId)
-          setInitState({
-            status: initResult.initialized ? 'success' : 'error',
-            message:
-              initResult.message ??
-              (initResult.initialized
-                ? 'התחברנו למסד הנתונים בהצלחה.'
-                : 'לא הצלחנו להתחבר למסד הנתונים. בדקו את ההגדרות ונסו שוב.')
-          })
-          if (!initResult.initialized) {
+          try {
+            const initResult = await initializeSetupForOrganization(orgId)
+
+            if (!initResult.initialized) {
+              setNeedsPreparation(true)
+              setInitState({
+                status: 'error',
+                message:
+                  initResult.message ??
+                  'לא הצלחנו להתחבר למסד הנתונים. בדקו את ההרשאות ונסו שוב.',
+                error: undefined
+              })
+              return
+            }
+
+            setNeedsPreparation(false)
+            setInitState({
+              status: 'success',
+              message: initResult.message ?? 'התחברנו למסד הנתונים בהצלחה.',
+              error: undefined
+            })
+          } catch (error) {
+            const setupError = error as SetupWizardError
+            if (setupError.kind === 'missing-function') {
+              setNeedsPreparation(true)
+              setPreparationDetails(formatTechnicalDetails(setupError.cause))
+              setInitState({
+                status: 'warning',
+                message: 'נדרש להריץ את סקריפט ההתקנה של TutTiud לפני שנוכל להמשיך.',
+                error: undefined
+              })
+              return
+            }
+
+            setInitState({
+              status: 'error',
+              message: setupError.message,
+              error: formatTechnicalDetails(setupError.cause)
+            })
             return
           }
         }
       } catch (error) {
         const setupError = error as SetupWizardError
-        if (setupError.kind === 'missing-function') {
-          setNeedsPreparation(true)
-          setPreparationDetails(formatTechnicalDetails(setupError.cause))
-          setInitState({
-            status: 'warning',
-            message:
-              'נדרש להפעיל סקריפט הכנה חד-פעמי במסד הנתונים של Supabase לפני שנוכל להמשיך בתהליך ההקמה.',
-            error: undefined
-          })
-          return
-        }
         setInitState({
           status: 'error',
           message: setupError.message,
@@ -240,6 +526,7 @@ export const SetupWizardPage = () => {
       }
 
       setSchemaState({ status: 'loading', exists: null, lastBootstrappedAt: null })
+
       try {
         const schemaResult = await checkSchemaStatus(orgId)
         setSchemaState({
@@ -248,8 +535,10 @@ export const SetupWizardPage = () => {
           lastBootstrappedAt: schemaResult.lastBootstrappedAt,
           message: schemaResult.exists
             ? 'מבנה הנתונים של TutTiud זמין ומוכן.'
-            : 'מבנה הנתונים של TutTiud עדיין לא נוצר.'
+            : 'מבנה הנתונים של TutTiud עדיין לא נוצר.',
+          error: undefined
         })
+
         if (!schemaResult.exists) {
           setDiagnosticsState({ status: 'idle', diagnostics: null })
           return
@@ -267,6 +556,7 @@ export const SetupWizardPage = () => {
       }
 
       setDiagnosticsState({ status: 'loading', diagnostics: null })
+
       try {
         const diagnostics = await runDiagnostics(orgId)
         const severity: StepState['status'] = diagnostics
@@ -276,10 +566,12 @@ export const SetupWizardPage = () => {
             ? 'warning'
             : 'error'
           : 'success'
+
         setDiagnosticsState({
           status: severity,
           diagnostics,
-          message: diagnostics?.summary
+          message: diagnostics?.summary,
+          error: undefined
         })
       } catch (error) {
         const diagnosticsError = error as SetupWizardError
@@ -290,10 +582,17 @@ export const SetupWizardPage = () => {
           error: formatTechnicalDetails(diagnosticsError.cause)
         })
       }
-    }
+    },
+    [selectedOrganization]
+  )
 
-    void runChecks()
-  }, [readyToStart, selectedOrganization, refreshToken])
+  useEffect(() => {
+    if (!selectedOrganization || !validationTrigger) return
+
+    const trigger = validationTrigger
+    setValidationTrigger(null)
+    void runValidation(trigger)
+  }, [runValidation, selectedOrganization, validationTrigger])
 
   const runConnectionUpdate = useCallback(async () => {
     if (!selectedOrganization || !organizationSettings) {
@@ -408,12 +707,6 @@ export const SetupWizardPage = () => {
     }
   }
 
-  const diagnosticsSeverity = diagnosticsState.diagnostics?.status ?? null
-  const diagnosticsIssues = diagnosticsState.diagnostics?.issues ?? []
-  const diagnosticsSql = diagnosticsState.diagnostics?.sqlSnippets ?? []
-  const isConnectionUpdateLoading = connectionUpdateState.status === 'loading'
-  const isInitialLoading = initState.status === 'loading'
-
   const handleCopyScript = useCallback(async () => {
     try {
       if (!navigator?.clipboard?.writeText) {
@@ -427,6 +720,85 @@ export const SetupWizardPage = () => {
       setCopyStatus('error')
     }
   }, [])
+
+  const handleSaveAppKey = useCallback(async () => {
+    if (!selectedOrganization) {
+      return
+    }
+
+    const trimmedKey = appKeyInput.trim()
+
+    if (!trimmedKey) {
+      setAppKeyState({
+        status: 'error',
+        message: 'הדביקו את ערך APP_DEDICATED_KEY ולאחר מכן לחצו על "שמירת המפתח".',
+        error: undefined
+      })
+      return
+    }
+
+    if (!organizationSettings) {
+      setAppKeyState({
+        status: 'error',
+        message: 'ההגדרות של הארגון עדיין נטענות. נסו שוב בעוד רגע.',
+        error: undefined
+      })
+      return
+    }
+
+    setAppKeyState({
+      status: 'loading',
+      message: 'שומרים את מפתח היישום...',
+      error: undefined
+    })
+
+    try {
+      const metadata = await saveTuttiudAppKey(selectedOrganization.org_id, trimmedKey, {
+        currentMetadata: organizationSettings.metadata.raw
+      })
+
+      setOrganizationSettings((previous) => {
+        if (!previous || previous.org_id !== selectedOrganization.org_id) {
+          return previous
+        }
+
+        return {
+          ...previous,
+          metadata
+        }
+      })
+
+      setAppKeyState({
+        status: 'success',
+        message: 'המפתח נשמר בהצלחה. ניתן לעבור לשלב בדיקת החיבור.',
+        error: undefined
+      })
+    } catch (error) {
+      const keyError = error as SetupWizardError
+      setAppKeyState({
+        status: 'error',
+        message: keyError.message,
+        error: formatTechnicalDetails(keyError.cause)
+      })
+    }
+  }, [appKeyInput, organizationSettings, selectedOrganization])
+
+  const handleRequestValidation = useCallback(() => {
+    if (!selectedOrganization) {
+      return
+    }
+
+    if (shouldShowPreparationGuide && !hasStoredAppKey) {
+      setAppKeyState({
+        status: 'error',
+        message: 'שמרו את מפתח היישום לפני בדיקת החיבור.',
+        error: undefined
+      })
+      return
+    }
+
+    setValidationTrigger('manual')
+  }, [hasStoredAppKey, selectedOrganization, shouldShowPreparationGuide])
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col gap-6 bg-muted/30 px-4 py-8">
@@ -446,41 +818,40 @@ export const SetupWizardPage = () => {
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
-            {needsPreparation && (
+            {shouldShowPreparationGuide && (
               <section className="space-y-3 rounded-lg border border-primary/40 bg-primary/10 p-4">
                 <header className="flex flex-col gap-1 text-right">
-                  <h2 className="text-lg font-semibold text-primary">
-                    שלב 0 — הכנת מסד הנתונים ל-TutTiud
-                  </h2>
+                  <h2 className="text-lg font-semibold text-primary">שלב 1 — הכנת מסד הנתונים</h2>
                   <p className="text-sm text-muted-foreground">
-                    כדי להתחבר ל-TutTiud, יש להריץ סקריפט הכנה חד-פעמי במסד הנתונים של Supabase. הסקריפט יוצר את סכימת tuttiud
-                    והפונקציות הדרושות.
+                    לפני בדיקת החיבור, ודאו שהסכימה tuttiud חשופה דרך הגדרות ה-API והריצו את סקריפט ההכנה המלא במסד הנתונים של Supabase.
                   </p>
                 </header>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button type="button" variant="secondary" onClick={handleCopyScript}>
                     העתקת הסקריפט
                   </Button>
-                  <Button
-                    type="button"
+                <Button
+                  type="button"
                     onClick={() => setRefreshToken((value) => value + 1)}
-                    disabled={isInitialLoading}
+                    disabled={isValidationLoading}
                   >
-                    הרצתי את הסקריפט — נסו שוב
+                    סיימתי את ההכנה — רעננו את הנתונים
                   </Button>
                 </div>
                 {copyStatus === 'success' && (
-                  <p className="text-xs text-emerald-700">הסקריפט הועתק ללוח. ניתן להדביק אותו בעורך ה-SQL של Supabase.</p>
+                  <p className="text-xs text-emerald-700">
+                    הסקריפט הועתק ללוח. הדביקו אותו ב-SQL Editor של Supabase והפעילו אותו במלואו.
+                  </p>
                 )}
                 {copyStatus === 'error' && (
                   <p className="text-xs text-destructive">
-                    לא הצלחנו להעתיק אוטומטית את הסקריפט. העתיקו ידנית את הטקסט המלא למטה.
+                    לא הצלחנו להעתיק אוטומטית את הסקריפט. העתיקו ידנית את הטקסט המלא שמופיע למטה.
                   </p>
                 )}
                 <ol className="list-decimal space-y-1 rounded-md border border-dashed border-muted-foreground/40 bg-muted/40 p-3 text-right text-sm">
-                  <li>לחצו על "העתקת הסקריפט" כדי לשמור אותו בלוח.</li>
-                  <li>היכנסו ל-Supabase &gt; SQL Editor בפרויקט של הארגון.</li>
-                  <li>הדביקו את הסקריפט והפעילו אותו. לאחר מכן חזרו לכאן ולחצו על "הרצתי את הסקריפט — נסו שוב".</li>
+                  <li>ב-Supabase Settings → API הוסיפו את tuttiud לרשימת Exposed schemas.</li>
+                  <li>פתחו את SQL Editor, הדביקו את הסקריפט המלא והריצו אותו.</li>
+                  <li>בסיום העתקו את הערך APP_DEDICATED_KEY שיוצג והמשיכו לשלב הזנת המפתח.</li>
                 </ol>
                 <pre className="overflow-x-auto whitespace-pre rounded-md border border-muted-foreground/30 bg-background p-3 text-left text-xs ltr" dir="ltr">
                   <code>{DATABASE_PREPARATION_SQL}</code>
@@ -488,12 +859,52 @@ export const SetupWizardPage = () => {
                 <TechnicalDetails details={preparationDetails} />
               </section>
             )}
+            {shouldShowAppKeyStep && (
+              <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
+                <header className="flex items-center justify-between">
+                  <div className="text-right">
+                    <h2 className="text-lg font-semibold">שלב 2 — הזנת מפתח היישום</h2>
+                    <p className="text-sm text-muted-foreground">
+                      הדביקו את APP_DEDICATED_KEY שהתקבל מהסקריפט ושמרו אותו כדי שנוכל להמשיך לאימות החיבור.
+                    </p>
+                  </div>
+                  <StepStatusBadge state={appKeyState} />
+                </header>
+                <div className="space-y-2 text-right">
+                  <Label htmlFor="tuttiud-app-key" className="text-sm font-semibold">
+                    ערך APP_DEDICATED_KEY
+                  </Label>
+                  <textarea
+                    id="tuttiud-app-key"
+                    className="min-h-[6rem] w-full rounded-md border border-muted-foreground/40 bg-background p-3 text-left text-xs ltr focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    dir="ltr"
+                    value={appKeyInput}
+                    onChange={(event) => setAppKeyInput(event.target.value)}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  />
+                </div>
+                {appKeyState.message && (
+                  <p className="text-sm text-muted-foreground">{appKeyState.message}</p>
+                )}
+                {appKeyState.error && <TechnicalDetails details={appKeyState.error} />}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    onClick={handleSaveAppKey}
+                    disabled={appKeyState.status === 'loading' || !isSettingsLoaded}
+                  >
+                    שמירת המפתח
+                  </Button>
+                </div>
+              </section>
+            )}
+
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 1 — בדיקת החיבור למסד הנתונים</h2>
+                  <h2 className="text-lg font-semibold">שלב 3 — בדיקת החיבור למסד הנתונים</h2>
                   <p className="text-sm text-muted-foreground">
-                    אנו טוענים את פרטי ההתחברות ובודקים שניתן להתחבר למסד הנתונים של TutTiud.
+                    לאחר שמירת המפתח נריץ בדיקה יזומה כדי לוודא שניתן להתחבר למסד הנתונים של TutTiud.
                   </p>
                 </div>
                 <StepStatusBadge state={initState} />
@@ -512,9 +923,13 @@ export const SetupWizardPage = () => {
                   <div className="flex flex-col gap-0.5 text-right">
                     <dt className="font-semibold text-foreground">מפתח גישה ציבורי (Anon Key)</dt>
                     <dd className="text-left" dir="ltr">
-                      {organizationSettings.anon_key
-                        ? '✓ מוגדר (מוסתר לביטחון)'
-                        : 'לא הוגדר'}
+                      {organizationSettings.anon_key ? '✓ מוגדר (מוסתר לביטחון)' : 'לא הוגדר'}
+                    </dd>
+                  </div>
+                  <div className="flex flex-col gap-0.5 text-right">
+                    <dt className="font-semibold text-foreground">סטטוס חיבור TutTiud</dt>
+                    <dd className="text-left" dir="ltr">
+                      {tuttiudStatus === 'connected' ? '✓ מחובר' : 'ממתין לאימות'}
                     </dd>
                   </div>
                   <div className="flex flex-col gap-0.5 text-right">
@@ -522,31 +937,18 @@ export const SetupWizardPage = () => {
                     <dd>
                       {organizationSettings.updated_at
                         ? new Date(organizationSettings.updated_at).toLocaleString('he-IL')
-                        : 'טרם סונכרן'}
-                    </dd>
-                  </div>
-                  <div className="flex flex-col gap-0.5 text-right">
-                    <dt className="font-semibold text-foreground">סטטוס חיבור TutTiud</dt>
-                    <dd
-                      className={
-                        organizationSettings.metadata.connections.tuttiud === 'connected'
-                          ? 'text-emerald-600'
-                          : 'text-amber-600'
-                      }
-                    >
-                      {organizationSettings.metadata.connections.tuttiud === 'connected'
-                        ? 'מחובר'
-                        : 'דורש השלמה'}
+                        : 'אין נתון'}
                     </dd>
                   </div>
                 </dl>
               )}
-              {connectionUpdateState.status === 'loading' && connectionUpdateState.message ? (
+              {initState.error && <TechnicalDetails details={initState.error} />}
+              {connectionUpdateState.status === 'loading' && connectionUpdateState.message && (
                 <p className="text-xs text-muted-foreground">{connectionUpdateState.message}</p>
-              ) : null}
-              {connectionUpdateState.status === 'success' && connectionUpdateState.message ? (
+              )}
+              {connectionUpdateState.status === 'success' && connectionUpdateState.message && (
                 <p className="text-xs text-emerald-600">{connectionUpdateState.message}</p>
-              ) : null}
+              )}
               {connectionUpdateState.status === 'error' && (
                 <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-right text-xs">
                   <p className="text-destructive">{connectionUpdateState.message}</p>
@@ -564,15 +966,31 @@ export const SetupWizardPage = () => {
                   </div>
                 </div>
               )}
-              <TechnicalDetails details={initState.error} />
-            </section>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setRefreshToken((value) => value + 1)}
+                  disabled={isValidationLoading}
+                >
+                  רענון הנתונים
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleRequestValidation}
+                  disabled={!canRequestValidation || isValidationLoading}
+                >
+                  בדיקת החיבור
+                </Button>
+              </div>
+              </section>
 
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 2 — אימות מבנה הנתונים</h2>
+                  <h2 className="text-lg font-semibold">שלב 4 — יצירת מבנה הנתונים</h2>
                   <p className="text-sm text-muted-foreground">
-                    בודקים שהטבלאות וההרשאות של TutTiud קיימות ומעודכנות.
+                    בודקים שהטבלאות והפונקציות של TutTiud קיימות. אם חסר מבנה נתונים ניתן להפעיל את תהליך ההקמה האוטומטי.
                   </p>
                 </div>
                 <StepStatusBadge state={schemaState} />
@@ -585,17 +1003,13 @@ export const SetupWizardPage = () => {
                   עודכן לאחרונה: {new Date(schemaState.lastBootstrappedAt).toLocaleString('he-IL')}
                 </p>
               )}
-              {schemaState.error && (
-                <TechnicalDetails details={schemaState.error} />
-              )}
-              {schemaState.status === 'success' && schemaState.exists === false && (
+              {schemaState.error && <TechnicalDetails details={schemaState.error} />}
+              {schemaState.exists === false && (
                 <div className="flex flex-col items-end justify-between gap-3 rounded-md border border-dashed border-primary/40 bg-primary/5 p-4 text-sm">
                   <p>
-                    נראה שמבנה הנתונים עדיין לא הוגדר. לחצו על הכפתור כדי להפעיל את תהליך ההקמה האוטומטי.
+                    נראה שמבנה הנתונים עדיין לא הוגדר. לחצו על הכפתור כדי להריץ את ההקמה האוטומטית.
                   </p>
-                  <Button onClick={handleCreateSchema}>
-                    צרו את מבנה הנתונים של TutTiud
-                  </Button>
+                  <Button onClick={handleCreateSchema}>צרו את מבנה הנתונים של TutTiud</Button>
                 </div>
               )}
             </section>
@@ -603,7 +1017,7 @@ export const SetupWizardPage = () => {
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 3 — בדיקות אחרונות</h2>
+                  <h2 className="text-lg font-semibold">שלב 5 — בדיקות אחרונות</h2>
                   <p className="text-sm text-muted-foreground">
                     מריצים בדיקות כדי לוודא שהכל מוכן לעבודה ושאין הרשאות חסרות.
                   </p>
