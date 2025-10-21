@@ -60,6 +60,10 @@ export type SetupWizardError = {
   kind?: 'missing-function' | 'unauthorized' | 'unknown'
 }
 
+export type SetupStatus = {
+  hasDedicatedKey: boolean
+}
+
 const errorForMissingClient: SetupWizardError = {
   message: 'לא הצלחנו להתחבר ל-Supabase. רעננו את הדפדפן או צרו קשר עם התמיכה.'
 }
@@ -137,6 +141,61 @@ const normaliseSqlSnippets = (sql: unknown): DiagnosticsSqlSnippet[] => {
     ]
   }
   return []
+}
+
+const normaliseDiagnosticsPayload = (raw: unknown): SetupDiagnostics => {
+  if (!raw) {
+    return {
+      status: 'ok',
+      summary: 'האבחון הסתיים ללא הערות.',
+      issues: [],
+      sqlSnippets: [],
+      raw
+    }
+  }
+
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      status: 'warning',
+      summary: 'התקבלה תשובת אבחון בלתי צפויה. בדקו את סקריפט ההתקנה ונסו שוב.',
+      issues: [],
+      sqlSnippets: [],
+      raw
+    }
+  }
+
+  const typedRaw = raw as Record<string, unknown>
+
+  const statusValue = typedRaw.status
+  const status: SetupDiagnostics['status'] =
+    typeof statusValue === 'string' && ['ok', 'warning', 'error'].includes(statusValue)
+      ? (statusValue as SetupDiagnostics['status'])
+      : 'warning'
+
+  const summaryValue = typedRaw.summary
+  const summary =
+    typeof summaryValue === 'string'
+      ? summaryValue
+      : status === 'ok'
+      ? 'הכל תקין. ניתן להמשיך.'
+      : 'זוהו פריטים המצריכים תשומת לב.'
+
+  const issues: DiagnosticsIssue[] = [
+    ...mapDiagnosticsIssues(typedRaw.missing_tables, 'table'),
+    ...mapDiagnosticsIssues(typedRaw.missing_policies, 'policy'),
+    ...mapDiagnosticsIssues(typedRaw.permission_issues, 'permission'),
+    ...mapDiagnosticsIssues(typedRaw.other_issues, 'other')
+  ]
+
+  const sqlSnippets = normaliseSqlSnippets(typedRaw.suggested_sql ?? typedRaw.sql)
+
+  return {
+    status,
+    summary,
+    issues,
+    sqlSnippets,
+    raw
+  }
 }
 
 type OrgSettingsRow = {
@@ -241,6 +300,58 @@ export const fetchOrganizationSetupSettings = async (
     }
   })
 
+export const fetchSetupStatus = async (
+  orgId: string,
+  options?: { accessToken?: string | null }
+): Promise<SetupStatus> => {
+  if (!orgId) {
+    throw {
+      message: 'מזהה הארגון חסר. רעננו את העמוד ונסו שוב.'
+    } satisfies SetupWizardError
+  }
+
+  const accessToken = options?.accessToken?.trim() ?? ''
+
+  if (!accessToken) {
+    throw {
+      message: 'תוקף ההתחברות פג. התחברו מחדש ונסו שוב.'
+    } satisfies SetupWizardError
+  }
+
+  try {
+    const response = await fetch(`/api/setup-status?orgId=${encodeURIComponent(orgId)}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    })
+
+    const data = (await response.json().catch(() => null)) as
+      | { success?: boolean; hasDedicatedKey?: boolean; message?: string }
+      | null
+
+    if (!response.ok || !data?.success) {
+      throw {
+        message:
+          data?.message ?? 'טעינת סטטוס ההגדרה נכשלה. נסו שוב בעוד מספר רגעים.',
+        cause: data
+      } satisfies SetupWizardError
+    }
+
+    return {
+      hasDedicatedKey: Boolean(data.hasDedicatedKey)
+    }
+  } catch (error) {
+    if ((error as SetupWizardError)?.message) {
+      throw error
+    }
+
+    throw {
+      message: 'לא ניתן היה לקבל את סטטוס ההגדרה מהשרת. ודאו שהחיבור תקין ונסו שוב.',
+      cause: error
+    } satisfies SetupWizardError
+  }
+}
+
 export const updateTuttiudConnectionStatus = async (
   orgId: string,
   status: Exclude<TuttiudConnectionStatus, null>,
@@ -339,6 +450,61 @@ export const saveTuttiudAppKey = async (
 
     throw {
       message: 'לא הצלחנו לתקשר עם שרת האימות. ודאו שהחיבור תקין ונסו שוב.',
+      cause: error
+    } satisfies SetupWizardError
+  }
+}
+
+export const verifyStoredTuttiudSetup = async (
+  orgId: string,
+  options?: { accessToken?: string | null }
+): Promise<{ diagnostics: SetupDiagnostics }> => {
+  if (!orgId) {
+    throw {
+      message: 'מזהה הארגון חסר. רעננו את העמוד ונסו שוב.'
+    } satisfies SetupWizardError
+  }
+
+  const accessToken = options?.accessToken?.trim() ?? ''
+
+  if (!accessToken) {
+    throw {
+      message: 'תוקף ההתחברות פג. התחברו מחדש ונסו שוב.'
+    } satisfies SetupWizardError
+  }
+
+  try {
+    const response = await fetch('/api/verify-tuttiud-setup', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({ orgId })
+    })
+
+    const data = (await response.json().catch(() => null)) as
+      | { success?: boolean; message?: string; diagnostics?: unknown; details?: unknown }
+      | null
+
+    if (!response.ok || !data?.success) {
+      throw {
+        message:
+          data?.message ?? 'האימות עם המפתח השמור נכשל. בדקו את סקריפט ההתקנה ונסו שוב.',
+        cause: data?.details ?? data
+      } satisfies SetupWizardError
+    }
+
+    return {
+      diagnostics: normaliseDiagnosticsPayload(data.diagnostics ?? null)
+    }
+  } catch (error) {
+    if ((error as SetupWizardError)?.message) {
+      throw error
+    }
+
+    throw {
+      message: 'לא הצלחנו להריץ את האימות מול מסד הנתונים. ודאו שהחיבור תקין ונסו שוב.',
       cause: error
     } satisfies SetupWizardError
   }
@@ -468,44 +634,8 @@ export const runDiagnostics = async (
       }
 
       const raw = data as Record<string, unknown> | null
-      if (!raw) {
-        return {
-          status: 'ok',
-          summary: 'האבחון הסתיים ללא הערות.',
-          issues: [],
-          sqlSnippets: [],
-          raw
-        }
-      }
 
-      const status =
-        typeof raw.status === 'string' && ['ok', 'warning', 'error'].includes(raw.status)
-          ? (raw.status as SetupDiagnostics['status'])
-          : 'warning'
-
-      const summary =
-        typeof raw.summary === 'string'
-          ? raw.summary
-          : status === 'ok'
-          ? 'הכל תקין. ניתן להמשיך.'
-          : 'זוהו פריטים המצריכים תשומת לב.'
-
-      const issues: DiagnosticsIssue[] = [
-        ...mapDiagnosticsIssues(raw.missing_tables, 'table'),
-        ...mapDiagnosticsIssues(raw.missing_policies, 'policy'),
-        ...mapDiagnosticsIssues(raw.permission_issues, 'permission'),
-        ...mapDiagnosticsIssues(raw.other_issues, 'other')
-      ]
-
-      const sqlSnippets = normaliseSqlSnippets(raw.suggested_sql ?? raw.sql)
-
-      return {
-        status,
-        summary,
-        issues,
-        sqlSnippets,
-        raw
-      }
+      return normaliseDiagnosticsPayload(raw)
     } catch (error) {
       if (isPostgrestMissingFunction(error)) {
         return {

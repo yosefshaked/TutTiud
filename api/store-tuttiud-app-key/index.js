@@ -29,13 +29,31 @@ module.exports = async function (context, req) {
     return
   }
 
+  const missingInfrastructureVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
+    .filter((name) => !process.env[name])
+
+  if (missingInfrastructureVars.length > 0) {
+    context.log(
+      'store-tuttiud-app-key: missing infrastructure configuration',
+      missingInfrastructureVars
+    )
+    sendJson(context, 500, {
+      success: false,
+      message: `הגדרת השרת חסרה (Missing env: ${missingInfrastructureVars.join(', ')}). פנו לתמיכה לקבלת סיוע.`
+    })
+    return
+  }
+
   const encryptionSecret = process.env.APP_ORG_CREDENTIALS_ENCRYPTION_KEY
 
   if (!encryptionSecret) {
-    context.log('store-tuttiud-app-key: missing encryption configuration')
+    context.log('store-tuttiud-app-key: missing encryption configuration', {
+      missing: 'APP_ORG_CREDENTIALS_ENCRYPTION_KEY'
+    })
     sendJson(context, 500, {
       success: false,
-      message: 'הגדרת השרת אינה מלאה. פנו לתמיכה לקבלת סיוע.'
+      message:
+        'הגדרת השרת חסרה (Missing env: APP_ORG_CREDENTIALS_ENCRYPTION_KEY). פנו לתמיכה לקבלת סיוע.'
     })
     return
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,15 +9,18 @@ import { useAuth } from '@/app/providers/auth-provider'
 import { useOrganization } from '@/app/providers/organization-provider'
 import {
   checkSchemaStatus,
+  fetchSetupStatus,
   fetchOrganizationSetupSettings,
   initializeSetupForOrganization,
   runDiagnostics,
   runSchemaBootstrap,
   type DiagnosticsSqlSnippet,
   type OrganizationSetupSettings,
+  type SetupStatus,
   type SetupDiagnostics,
   type SetupWizardError,
   saveTuttiudAppKey,
+  verifyStoredTuttiudSetup,
   updateTuttiudConnectionStatus
 } from '@/lib/setup-wizard'
 
@@ -252,6 +255,7 @@ export const SetupWizardPage = () => {
   const navigate = useNavigate()
   const { clientAvailable, session } = useAuth()
   const { selectedOrganization, status: organizationStatus } = useOrganization()
+  const queryClient = useQueryClient()
 
   const [initState, setInitState] = useState<StepState>({ status: 'idle' })
   const [schemaState, setSchemaState] = useState<SchemaState>({
@@ -289,6 +293,14 @@ export const SetupWizardPage = () => {
   )
 
   const organizationId = selectedOrganization?.org_id ?? null
+  const accessToken = session?.access_token ?? null
+
+  const setupStatusQuery = useQuery<SetupStatus, SetupWizardError>({
+    queryKey: ['setup-wizard', 'setup-status', organizationId, accessToken, refreshToken],
+    queryFn: () => fetchSetupStatus(organizationId!, { accessToken }),
+    enabled: readyToStart && Boolean(organizationId) && Boolean(accessToken),
+    refetchOnWindowFocus: false
+  })
 
   const settingsQuery = useQuery<OrganizationSetupSettings | null, SetupWizardError>({
     queryKey: ['setup-wizard', 'organization-settings', organizationId, refreshToken],
@@ -304,24 +316,37 @@ export const SetupWizardPage = () => {
   }, [selectedOrganization])
 
   const tuttiudStatus = organizationSettings?.metadata.connections.tuttiud ?? null
-  const hasStoredAppKey = Boolean(organizationSettings?.metadata.credentials.tuttiudAppJwt)
+  const hasDedicatedKeyStored = setupStatusQuery.data?.hasDedicatedKey ?? false
+  const hasStoredAppKey =
+    hasDedicatedKeyStored || Boolean(organizationSettings?.metadata.credentials.tuttiudAppJwt)
   const shouldShowPreparationGuide = needsPreparation
   const shouldShowAppKeyStep =
-    !shouldShowPreparationGuide || preparationAcknowledged || hasStoredAppKey
+    !hasDedicatedKeyStored &&
+    (!shouldShowPreparationGuide || preparationAcknowledged || hasStoredAppKey)
+  const showReturningVerification = hasDedicatedKeyStored && !needsPreparation
   const diagnosticsSeverity = diagnosticsState.diagnostics?.status ?? null
   const diagnosticsIssues = diagnosticsState.diagnostics?.issues ?? []
   const diagnosticsSql = diagnosticsState.diagnostics?.sqlSnippets ?? []
   const isValidationLoading = initState.status === 'loading'
   const canRequestValidation =
     Boolean(selectedOrganization && organizationSettings) &&
-    (!shouldShowPreparationGuide || preparationAcknowledged) &&
-    (tuttiudStatus === 'connected' || hasStoredAppKey)
+    (hasDedicatedKeyStored || !shouldShowPreparationGuide || preparationAcknowledged) &&
+    (hasDedicatedKeyStored || tuttiudStatus === 'connected' || hasStoredAppKey)
+  const requiresFullPreparation = !hasDedicatedKeyStored
   const isPreparationChecklistComplete =
-    preparationChecklist.schemaExposed &&
+    (requiresFullPreparation ? preparationChecklist.schemaExposed : true) &&
     preparationChecklist.scriptExecuted &&
-    preparationChecklist.keyCaptured
+    (requiresFullPreparation ? preparationChecklist.keyCaptured : true)
   const isSettingsLoaded = Boolean(organizationSettings)
   const isConnectionUpdateLoading = connectionUpdateState.status === 'loading'
+
+  const connectionStepTitle = showReturningVerification
+    ? 'אימות ההגדרה במסד הנתונים'
+    : 'שלב 2 — בדיקת החיבור למסד הנתונים'
+  const connectionStepDescription = showReturningVerification
+    ? 'זיהינו שמפתח היישום כבר שמור. לחצו על הכפתור כדי לוודא שהמסד מוכן לשימוש. אם הבדיקה נכשלת, האשף יציג מחדש את הוראות ההכנה.'
+    : 'לאחר שמירת המפתח נריץ בדיקה יזומה כדי לוודא שניתן להתחבר למסד הנתונים של TutTiud.'
+  const validationButtonLabel = showReturningVerification ? 'אימות ההגדרה' : 'בדיקת החיבור'
 
   const resetPreparationChecklist = useCallback(() => {
     setPreparationChecklist({
@@ -340,7 +365,12 @@ export const SetupWizardPage = () => {
           [key]: checked
         }
 
-        if (!(next.schemaExposed && next.scriptExecuted && next.keyCaptured)) {
+        const checklistComplete =
+          (requiresFullPreparation ? next.schemaExposed : true) &&
+          next.scriptExecuted &&
+          (requiresFullPreparation ? next.keyCaptured : true)
+
+        if (!checklistComplete) {
           setPreparationAcknowledged(false)
           setPreparationState((previous) =>
             previous.status === 'success'
@@ -356,7 +386,7 @@ export const SetupWizardPage = () => {
         return next
       })
     },
-    []
+    [requiresFullPreparation]
   )
 
   const requireManualPreparation = useCallback(
@@ -390,14 +420,31 @@ export const SetupWizardPage = () => {
   useEffect(() => {
     if (!readyToStart || !selectedOrganization) return
 
-    if (settingsQuery.isFetching) {
+    if (settingsQuery.isFetching || setupStatusQuery.isFetching) {
       setPreparationDetails(null)
       setCopyStatus('idle')
     }
-  }, [readyToStart, selectedOrganization, settingsQuery.isFetching])
+  }, [
+    readyToStart,
+    selectedOrganization,
+    settingsQuery.isFetching,
+    setupStatusQuery.isFetching
+  ])
 
   useEffect(() => {
     if (!readyToStart || !selectedOrganization) return
+
+    if (setupStatusQuery.isError) {
+      const statusError = setupStatusQuery.error
+      setOrganizationSettings(null)
+      setInitState({
+        status: 'error',
+        message:
+          statusError.message ?? 'טעינת סטטוס ההגדרה נכשלה. נסו שוב בעוד רגע.',
+        error: formatTechnicalDetails(statusError.cause)
+      })
+      return
+    }
 
     if (settingsQuery.isError) {
       const fetchError = settingsQuery.error
@@ -411,7 +458,7 @@ export const SetupWizardPage = () => {
       return
     }
 
-    if (!settingsQuery.isSuccess) {
+    if (!setupStatusQuery.isSuccess || !settingsQuery.isSuccess) {
       return
     }
 
@@ -435,7 +482,47 @@ export const SetupWizardPage = () => {
       return
     }
 
+    const hasDedicatedKey = setupStatusQuery.data?.hasDedicatedKey ?? false
     const storedKey = settings.metadata.credentials.tuttiudAppJwt ?? ''
+    const isAlreadyConnected = settings.metadata.connections.tuttiud === 'connected'
+
+    if (hasDedicatedKey) {
+      setAppKeyInput('')
+      setAppKeyState((previous) =>
+        previous.status === 'error'
+          ? previous
+          : {
+              status: 'success',
+              message: 'מפתח היישום כבר שמור בארגון. ניתן לאמת את ההתקנה הקיימת.',
+              error: undefined
+            }
+      )
+
+      if (!needsPreparation) {
+        setPreparationAcknowledged(true)
+        setPreparationState((previous) =>
+          previous.status === 'error'
+            ? previous
+            : {
+                status: 'success',
+                message: 'זיהינו מפתח שמור. המשיכו לאימות כדי לוודא שהכל תקין.',
+                error: undefined
+              }
+        )
+        setInitState((previous) =>
+          previous.status === 'error'
+            ? previous
+            : {
+                status: 'idle',
+                message: 'לחצו על "אימות ההגדרה" כדי לבדוק שהמסד מוכן לשימוש.',
+                error: undefined
+              }
+        )
+      }
+
+      return
+    }
+
     setAppKeyInput(storedKey)
 
     if (storedKey) {
@@ -454,7 +541,7 @@ export const SetupWizardPage = () => {
       )
     }
 
-    if (settings.metadata.connections.tuttiud === 'connected') {
+    if (isAlreadyConnected) {
       markPreparationSatisfied('החיבור למסד הנתונים כבר פעיל. נריץ בדיקות לוודא שהכל תקין.')
       setInitState({
         status: 'success',
@@ -466,25 +553,30 @@ export const SetupWizardPage = () => {
       requireManualPreparation({
         status: 'idle',
         message:
-          'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
+          'לפני שנבדוק את החיבור, עקבו אחר ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
         error: undefined
       })
       setInitState({
         status: 'idle',
         message:
-          'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
+          'לפני שנבדוק את החיבור, עקבו אחר ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
         error: undefined
       })
     }
   }, [
     markPreparationSatisfied,
+    needsPreparation,
     readyToStart,
     requireManualPreparation,
     selectedOrganization,
     settingsQuery.data,
     settingsQuery.error,
     settingsQuery.isError,
-    settingsQuery.isSuccess
+    settingsQuery.isSuccess,
+    setupStatusQuery.data,
+    setupStatusQuery.error,
+    setupStatusQuery.isError,
+    setupStatusQuery.isSuccess
   ])
 
   const runValidation = useCallback(
@@ -505,6 +597,8 @@ export const SetupWizardPage = () => {
       setSchemaState({ status: 'idle', exists: null, lastBootstrappedAt: null })
       setDiagnosticsState({ status: 'idle', diagnostics: null })
       setConnectionUpdateState({ status: 'idle' })
+
+      let verificationDiagnostics: SetupDiagnostics | null = null
 
       try {
         const settings = await fetchOrganizationSetupSettings(orgId)
@@ -528,38 +622,79 @@ export const SetupWizardPage = () => {
         const storedKey = settings.metadata.credentials.tuttiudAppJwt ?? ''
         const isAlreadyConnected = settings.metadata.connections.tuttiud === 'connected'
 
-        setAppKeyInput(storedKey)
-
-        if (storedKey) {
+        if (hasDedicatedKeyStored) {
+          setAppKeyInput('')
           setAppKeyState((previous) =>
             previous.status === 'error'
               ? previous
               : {
                   status: 'success',
-                  message: 'מפתח היישום נשמר. ממשיכים לבדיקה.',
+                  message: 'מפתח היישום שמור. נבדוק את ההתקנה הקיימת.',
                   error: undefined
                 }
           )
-        } else if (!isAlreadyConnected) {
-          requireManualPreparation({
-            status: 'error',
-            message: 'הדביקו ושמרו את מפתח APP_DEDICATED_KEY לפני בדיקת החיבור.',
-            error: undefined
-          })
-          setAppKeyState({
-            status: 'error',
-            message: 'הדביקו ושמרו את מפתח APP_DEDICATED_KEY לפני בדיקת החיבור.',
-            error: undefined
-          })
-          setInitState({
-            status: 'error',
-            message: 'חסר מפתח יישום. השלימו את שלב 1 ונסו שוב.',
-            error: undefined
-          })
-          return
+        } else {
+          setAppKeyInput(storedKey)
+
+          if (storedKey) {
+            setAppKeyState((previous) =>
+              previous.status === 'error'
+                ? previous
+                : {
+                    status: 'success',
+                    message: 'מפתח היישום נשמר. ממשיכים לבדיקה.',
+                    error: undefined
+                  }
+            )
+          } else if (!isAlreadyConnected) {
+            requireManualPreparation({
+              status: 'error',
+              message: 'הדביקו ושמרו את מפתח APP_DEDICATED_KEY לפני בדיקת החיבור.',
+              error: undefined
+            })
+            setAppKeyState({
+              status: 'error',
+              message: 'הדביקו ושמרו את מפתח APP_DEDICATED_KEY לפני בדיקת החיבור.',
+              error: undefined
+            })
+            setInitState({
+              status: 'error',
+              message: 'חסר מפתח יישום. השלימו את שלב 1 ונסו שוב.',
+              error: undefined
+            })
+            return
+          }
         }
 
-        if (isAlreadyConnected) {
+        if (hasDedicatedKeyStored && !needsPreparation) {
+          try {
+            const verification = await verifyStoredTuttiudSetup(orgId, {
+              accessToken
+            })
+
+            verificationDiagnostics = verification.diagnostics
+            markPreparationSatisfied('החיבור אומת בהצלחה באמצעות המפתח הקיים.')
+            setInitState({
+              status: 'success',
+              message: 'החיבור אומת בהצלחה באמצעות המפתח הקיים.',
+              error: undefined
+            })
+          } catch (error) {
+            const verificationError = error as SetupWizardError
+            requireManualPreparation({
+              status: 'error',
+              message: 'האימות עם המפתח הקיים נכשל. הריצו את סקריפט ההתקנה ונסו שוב.',
+              error: undefined
+            })
+            setPreparationDetails(formatTechnicalDetails(verificationError.cause))
+            setInitState({
+              status: 'error',
+              message: verificationError.message,
+              error: formatTechnicalDetails(verificationError.cause)
+            })
+            return
+          }
+        } else if (isAlreadyConnected) {
           markPreparationSatisfied('החיבור כבר אושר בעבר. נמשיך לבדיקות משלימות.')
           setInitState({
             status: 'success',
@@ -659,6 +794,23 @@ export const SetupWizardPage = () => {
         return
       }
 
+      if (verificationDiagnostics) {
+        const severity: StepState['status'] =
+          verificationDiagnostics.status === 'ok'
+            ? 'success'
+            : verificationDiagnostics.status === 'warning'
+            ? 'warning'
+            : 'error'
+
+        setDiagnosticsState({
+          status: severity,
+          diagnostics: verificationDiagnostics,
+          message: verificationDiagnostics.summary,
+          error: undefined
+        })
+        return
+      }
+
       setDiagnosticsState({ status: 'loading', diagnostics: null })
 
       try {
@@ -687,7 +839,14 @@ export const SetupWizardPage = () => {
         })
       }
     },
-    [markPreparationSatisfied, requireManualPreparation, selectedOrganization]
+    [
+      accessToken,
+      hasDedicatedKeyStored,
+      markPreparationSatisfied,
+      needsPreparation,
+      requireManualPreparation,
+      selectedOrganization
+    ]
   )
 
   useEffect(() => {
@@ -903,6 +1062,8 @@ export const SetupWizardPage = () => {
         message: 'המפתח נשמר והאימות הראשוני בוצע בהצלחה. המשיכו לבדיקה המלאה של החיבור.',
         error: undefined
       })
+
+      void queryClient.invalidateQueries({ queryKey: ['setup-wizard', 'setup-status'] })
     } catch (error) {
       const keyError = error as SetupWizardError
       setAppKeyState({
@@ -911,7 +1072,7 @@ export const SetupWizardPage = () => {
         error: formatTechnicalDetails(keyError.cause)
       })
     }
-  }, [appKeyInput, organizationSettings, selectedOrganization, session?.access_token])
+  }, [appKeyInput, organizationSettings, queryClient, selectedOrganization, session?.access_token])
 
   const handleRequestValidation = useCallback(() => {
     if (!selectedOrganization) {
@@ -962,6 +1123,14 @@ export const SetupWizardPage = () => {
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
+            {showReturningVerification && (
+              <section className="space-y-2 rounded-lg border border-primary/40 bg-primary/10 p-4 text-right">
+                <h2 className="text-lg font-semibold text-primary">ברוכים השבים ל-TutTiud</h2>
+                <p className="text-sm text-primary">
+                  זיהינו שמפתח היישום של TutTiud כבר שמור בארגון. לחצו על "אימות ההגדרה" כדי לוודא שהמסד מוכן לשימוש. אם האימות נכשל, נציג מחדש את הוראות ההכנה הידניות.
+                </p>
+              </section>
+            )}
             {shouldShowPreparationGuide && (
               <section className="space-y-4 rounded-lg border border-primary/40 bg-primary/10 p-4">
                 <header className="flex flex-col gap-2 text-right sm:flex-row sm:items-start sm:justify-between">
@@ -978,38 +1147,40 @@ export const SetupWizardPage = () => {
                 )}
                 {preparationState.error && <TechnicalDetails details={preparationState.error} />}
                 <ol className="space-y-3 rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 p-3 text-right text-sm">
-                  <li className="flex flex-col gap-2">
-                    <label className="flex items-start gap-3 text-right">
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
-                        checked={preparationChecklist.schemaExposed}
-                        onChange={(event) =>
-                          updatePreparationChecklist('schemaExposed', event.currentTarget.checked)
-                        }
-                      />
-                      <span className="flex flex-1 flex-col items-end gap-1">
-                        <span className="text-sm font-semibold text-foreground">פעולה 1: חשיפת הסכימה tuttiud</span>
-                        <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
-                          <span className="text-lg" aria-hidden="true">
-                            🗂️
+                  {(!hasDedicatedKeyStored || !needsPreparation) && (
+                    <li className="flex flex-col gap-2">
+                      <label className="flex items-start gap-3 text-right">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
+                          checked={preparationChecklist.schemaExposed}
+                          onChange={(event) =>
+                            updatePreparationChecklist('schemaExposed', event.currentTarget.checked)
+                          }
+                        />
+                        <span className="flex flex-1 flex-col items-end gap-1">
+                          <span className="text-sm font-semibold text-foreground">פעולה 1: חשיפת הסכימה tuttiud</span>
+                          <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+                            <span className="text-lg" aria-hidden="true">
+                              🗂️
+                            </span>
+                            היכנסו ל-Supabase Settings → API והוסיפו את tuttiud לרשימת Exposed schemas (הקישור ייפתח בחלון חדש – בחרו בפרויקט הרלוונטי במידת הצורך).
                           </span>
-                          היכנסו ל-Supabase Settings → API והוסיפו את tuttiud לרשימת Exposed schemas (הקישור ייפתח בחלון חדש – בחרו בפרויקט הרלוונטי במידת הצורך).
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <Button asChild size="sm" variant="outline">
+                              <a
+                                href="https://app.supabase.com/project/_/settings/api"
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                פתיחת הגדרות API
+                              </a>
+                            </Button>
+                          </div>
                         </span>
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <Button asChild size="sm" variant="outline">
-                            <a
-                              href="https://app.supabase.com/project/_/settings/api"
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              פתיחת הגדרות API
-                            </a>
-                          </Button>
-                        </div>
-                      </span>
-                    </label>
-                  </li>
+                      </label>
+                    </li>
+                  )}
                   <li className="flex flex-col gap-2">
                     <label className="flex items-start gap-3 text-right">
                       <input
@@ -1036,27 +1207,29 @@ export const SetupWizardPage = () => {
                       </span>
                     </label>
                   </li>
-                  <li className="flex flex-col gap-2">
-                    <label className="flex items-start gap-3 text-right">
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
-                        checked={preparationChecklist.keyCaptured}
-                        onChange={(event) =>
-                          updatePreparationChecklist('keyCaptured', event.currentTarget.checked)
-                        }
-                      />
-                      <span className="flex flex-1 flex-col items-end gap-1">
-                        <span className="text-sm font-semibold text-foreground">פעולה 3: שמירת APP_DEDICATED_KEY</span>
-                        <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
-                          <span className="text-lg" aria-hidden="true">
-                            🔑
+                  {(!hasDedicatedKeyStored || !needsPreparation) && (
+                    <li className="flex flex-col gap-2">
+                      <label className="flex items-start gap-3 text-right">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
+                          checked={preparationChecklist.keyCaptured}
+                          onChange={(event) =>
+                            updatePreparationChecklist('keyCaptured', event.currentTarget.checked)
+                          }
+                        />
+                        <span className="flex flex-1 flex-col items-end gap-1">
+                          <span className="text-sm font-semibold text-foreground">פעולה 3: שמירת APP_DEDICATED_KEY</span>
+                          <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+                            <span className="text-lg" aria-hidden="true">
+                              🔑
+                            </span>
+                            לאחר הרצת הסקריפט העתיקו את ערך APP_DEDICATED_KEY שיופיע בתוצאה ושמרו אותו זמנית להדבקה בשלב הבא.
                           </span>
-                          לאחר הרצת הסקריפט העתיקו את ערך APP_DEDICATED_KEY שיופיע בתוצאה ושמרו אותו זמנית להדבקה בשלב הבא.
                         </span>
-                      </span>
-                    </label>
-                  </li>
+                      </label>
+                    </li>
+                  )}
                 </ol>
                 {copyStatus === 'success' && (
                   <p className="text-xs text-emerald-700">
@@ -1122,10 +1295,8 @@ export const SetupWizardPage = () => {
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 2 — בדיקת החיבור למסד הנתונים</h2>
-                  <p className="text-sm text-muted-foreground">
-                    לאחר שמירת המפתח נריץ בדיקה יזומה כדי לוודא שניתן להתחבר למסד הנתונים של TutTiud.
-                  </p>
+                  <h2 className="text-lg font-semibold">{connectionStepTitle}</h2>
+                  <p className="text-sm text-muted-foreground">{connectionStepDescription}</p>
                 </div>
                 <StepStatusBadge state={initState} />
               </header>
@@ -1200,10 +1371,10 @@ export const SetupWizardPage = () => {
                   onClick={handleRequestValidation}
                   disabled={!canRequestValidation || isValidationLoading}
                 >
-                  בדיקת החיבור
+                  {validationButtonLabel}
                 </Button>
               </div>
-              </section>
+            </section>
 
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">

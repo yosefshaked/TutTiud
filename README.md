@@ -62,20 +62,27 @@ src/
   - `VITE_SUPABASE_ANON_KEY`
 - לאחר כל שינוי במשתנים יש לבצע Redeploy (או להריץ מחדש את ה-Workflow) כדי שהשינויים ייכנסו לבילד.
 
+- עבור פונקציות ה-Azure (Function App): היכנס אל **Azure Portal → Function App → Configuration → Application settings** והוסף את המשתנים הבאים עם הערכים מה-Control DB ומהמערכת המארחת.
+  - `SUPABASE_URL` – כתובת ה-Control DB לשימוש עם מפתח ה-Service Role.
+  - `SUPABASE_SERVICE_ROLE_KEY` – מפתח ה-Service Role של Supabase שמאפשר לפונקציות להפעיל RPC מאובטח.
+  - `APP_ORG_CREDENTIALS_ENCRYPTION_KEY` – סוד סימטרי להצפנת מפתח היישום של כל ארגון.
+- לאחר שמירת המשתנים לחץ על **Save** ו-**Restart** כדי שהפונקציות ייטענו מחדש עם ההגדרות החדשות. ללא שלושת הערכים הללו פונקציית `/api/store-tuttiud-app-key` תחזיר הודעת שגיאה ולא תשמור את המפתח.
+
 למידע מפורט נוסף וצילומי מסך, ראה/י את מדריך ההקמה המלא בקובץ [`ProjectDocs/setup.md`](ProjectDocs/setup.md#azure-static-web-apps) המתעד גם בעברית וגם באנגלית את תהליך ההזנה של משתני Azure.
 
 ## אשף ההקמה (Setup Wizard)
 
-- בעמוד `Setup Wizard` נטענות הגדרות הארגון מטבלת `org_settings`, כולל סטטוס החיבור (`metadata.connections.tuttiud`) והמפתח הייעודי (`metadata.credentials.tuttiudAppJwt`), כדי להבין אם נדרשת הכנה ידנית.
-- ארגון שלא סומן כ־`"connected"` מקבל מסלול מודרך שמתחיל ב**שלב 0**: צ'ק-ליסט מונחה לחשיפת הסכימה tuttiud, להרצת סקריפט ההכנה הרשמי (גרסה 2.2) ולהעתקת ערך `APP_DEDICATED_KEY`. לחצן "סיימתי את ההכנה" נפתח רק לאחר שכל תיבה סומנה, כדי לוודא שהמשתמש עבר על כל ההוראות.
-- **שלב 1** אוסף את ערך `APP_DEDICATED_KEY` שנוצר בסוף הסקריפט ושולח אותו לפונקציית Azure המאובטחת (`/api/store-tuttiud-app-key`) שמצפינה את המפתח, שומרת אותו בעמודת `organizations.dedicated_key_encrypted`, ומעדכנת את `org_settings.metadata` ללא חשיפת המפתח ל-Front-End.
-- **שלב 2** נשלט בידי המשתמש: רק לאחר לחיצה על "בדיקת החיבור" מתבצעת קריאה ל-`tuttiud.setup_assistant_initialize`. אם המערכת כבר מסומנת כ־`"connected"`, האשף מדלג על ההתחול וממשיך לשלב הבא.
-- **שלב 3** ו-**שלב 4** נשארו אוטומטיים: אימות מבנה (`setup_assistant_schema_status`) עם אפשרות להריץ `setup_assistant_run_bootstrap`, ולבסוף דיאגנוסטיקה (`setup_assistant_diagnostics`) עם הנחיות ידידותיות.
-- מסך בחירת הארגון מפנה לאשף כאשר הסטטוס אינו `"connected"`, והאשף מעדכן את המטא־דאטה באמצעות `updateTuttiudConnectionStatus` לאחר שכל השלבים עוברים בהצלחה.
+- בעת הטעינה האשף פונה ל-`/api/setup-status` (פונקציית Azure חדשה) כדי לבדוק אם קיים ערך מוצפן בעמודת `organizations.dedicated_key_encrypted`. התוצאה קובעת אם המשתמש יראה מסלול "חדש" או "חוזר".
+- אם נמצא מפתח שמור, מוצג כרטיס "ברוכים השבים" וכפתור "אימות ההגדרה". לחיצה עליו מריצה את `/api/verify-tuttiud-setup`, שמפענחת את המפתח הקיים ומריצה את `tuttiud.setup_assistant_diagnostics` לפני המשך הבדיקות.
+- ארגון חדש (ללא מפתח שמור) ממשיך למסלול המלא: **שלב 0** מציג צ'ק-ליסט חשיפה/סקריפט/העתקת המפתח וייפתח רק לאחר שכל המשימות סומנו. **שלב 1** מאפשר להדביק את `APP_DEDICATED_KEY` ולשמור אותו דרך `/api/store-tuttiud-app-key` (שמעדכנת גם את `org_settings.metadata`).
+- אם אימות המפתח הקיים נכשל, האשף מחזיר את המשתמש לשלבי ההכנה אך מותיר רק את פעולת הרצת הסקריפט (המערכת מזכירה שהמפתח כבר שמור ולכן לא מוצג שלב הזנה נוסף).
+- **שלב 2** מאחד את שני העולמות: ארגונים חוזרים מריצים אימות בלבד בעוד ארגונים חדשים מריצים `setup_assistant_initialize`. לאחר מכן מתבצעים תמיד בדיקות ה-`schema_status` והדיאגנוסטיקה, ולבסוף `updateTuttiudConnectionStatus` מסמן את החיבור כ-`connected` כאשר כל השלבים מצליחים.
+- מסך בחירת הארגון עדיין מפנה לאשף כאשר `metadata.connections.tuttiud` אינו `"connected"`, כך שאף ארגון לא מדלג בטעות על המסלול המתאים לו.
 
 ## שכבת BFF מאובטחת (Azure Functions)
 
 - הפונקציה `/api/store-tuttiud-app-key` מחייבת כעת אימות משתמש, מצפינה את מפתח היישום ושומרת אותו בעמודת `organizations.dedicated_key_encrypted` רק עבור מנהלים ובעלי מערכת.
+- פונקציות `/api/setup-status` ו-`/api/verify-tuttiud-setup` מריצות את בדיקות ההקמה הראשוניות ומאפשרות לאשף להבדיל בין ארגונים חדשים לחוזרים.
 - נוספו שלושה קצות API ייעודיים הפועלים מול מסד הנתונים הייעודי של הארגון בסכימת `tuttiud`:
   - `GET /api/students` – מחזיר את התלמידים המשויכים למדריך המחובר.
   - `POST /api/session-records` – יוצר תיעוד מפגש חדש לאחר וידוא שהמדריך אכן משויך לתלמיד שנבחר.
