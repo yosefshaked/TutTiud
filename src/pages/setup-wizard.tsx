@@ -257,7 +257,9 @@ export const SetupWizardPage = () => {
       const metadata = await updateTuttiudConnectionStatus(
         selectedOrganization.org_id,
         'connected',
-        { currentMetadata: organizationSettings.metadata.raw }
+        {
+          currentMetadata: organizationSettings.metadata.raw
+        }
       )
 
       setConnectionUpdateState({
