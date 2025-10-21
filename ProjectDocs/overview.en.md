@@ -9,7 +9,7 @@ TutTiud is a multi-tenant SaaS platform built for health and wellbeing organizat
 - RTL-first user interface with Hebrew copy for the onboarding journey.
 - Authentication and organization context providers prepared for future integration with the Control DB.
 - Routing guards enforcing authentication and organization selection before accessing protected screens.
-- Interactive Setup Wizard page that loads organization metadata, presents a guided Step 1 with the canonical Tuttiud SQL setup script (v2.1) and schema exposure instructions, collects the generated `APP_DEDICATED_KEY` in Step 2, requires a user-triggered RPC check in Step 3, and then continues with automated schema and diagnostics steps.
+- Interactive Setup Wizard page that loads organization metadata, presents a guided Step 1 with the canonical Tuttiud SQL setup script (v2.1) and schema exposure instructions, collects the generated `APP_DEDICATED_KEY` in Step 2, sends it to the secure Azure Function (`/api/store-tuttiud-app-key`) for encryption + storage before continuing with user-triggered initialization and automated schema/diagnostics checks.
 - Organization selector now inspects `org_settings.metadata.connections.tuttiud` to route users either back to their intended screen or into the Setup Wizard, and the wizard marks the connection as `"connected"` when all checks succeed.
 
 ## Next Steps (High-level)

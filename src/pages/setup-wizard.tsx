@@ -746,15 +746,25 @@ export const SetupWizardPage = () => {
       return
     }
 
+    if (!organizationSettings.supabase_url) {
+      setAppKeyState({
+        status: 'error',
+        message: 'יש להזין את כתובת Supabase של הארגון לפני שמירת המפתח.',
+        error: undefined
+      })
+      return
+    }
+
     setAppKeyState({
       status: 'loading',
-      message: 'שומרים את מפתח היישום...',
+      message: 'שומרים ומאמתים את מפתח היישום...',
       error: undefined
     })
 
     try {
       const metadata = await saveTuttiudAppKey(selectedOrganization.org_id, trimmedKey, {
-        currentMetadata: organizationSettings.metadata.raw
+        currentMetadata: organizationSettings.metadata.raw,
+        supabaseUrl: organizationSettings.supabase_url
       })
 
       setOrganizationSettings((previous) => {
@@ -768,9 +778,11 @@ export const SetupWizardPage = () => {
         }
       })
 
+      setAppKeyInput('')
+
       setAppKeyState({
         status: 'success',
-        message: 'המפתח נשמר בהצלחה. ניתן לעבור לשלב בדיקת החיבור.',
+        message: 'המפתח נשמר והאימות הראשוני בוצע בהצלחה. המשיכו לבדיקה המלאה של החיבור.',
         error: undefined
       })
     } catch (error) {

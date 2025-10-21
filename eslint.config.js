@@ -26,5 +26,18 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-expressions': 'off',
       'react-refresh/only-export-components': 'off'
     }
+  },
+  {
+    files: ['api/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'commonjs',
+      globals: {
+        ...globals.node
+      }
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off'
+    }
   }
 )

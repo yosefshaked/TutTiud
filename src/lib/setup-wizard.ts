@@ -281,43 +281,58 @@ export const updateTuttiudConnectionStatus = async (
 export const saveTuttiudAppKey = async (
   orgId: string,
   appKey: string,
-  options?: { currentMetadata?: Record<string, unknown> | null }
-): Promise<OrganizationSetupMetadata> =>
-  withClient(async (client) => {
-    const current = normaliseMetadata(options?.currentMetadata ?? null)
-    const existingConnections = isRecord(current.raw.connections)
-      ? (current.raw.connections as Record<string, unknown>)
-      : {}
-    const existingCredentials = isRecord(current.raw.credentials)
-      ? (current.raw.credentials as Record<string, unknown>)
-      : {}
+  options?: {
+    currentMetadata?: Record<string, unknown> | null
+    supabaseUrl?: string | null
+  }
+): Promise<OrganizationSetupMetadata> => {
+  if (!orgId) {
+    throw {
+      message: 'זיהוי הארגון חסר. רעננו את העמוד ונסו שוב.'
+    } satisfies SetupWizardError
+  }
 
-    const nextRaw: Record<string, unknown> = {
-      ...current.raw,
-      connections: {
-        ...existingConnections,
-        tuttiud: current.connections.tuttiud
+  const payload = {
+    orgId,
+    appKey,
+    supabaseUrl: options?.supabaseUrl ?? null,
+    currentMetadata: options?.currentMetadata ?? null
+  }
+
+  try {
+    const response = await fetch('/api/store-tuttiud-app-key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
       },
-      credentials: {
-        ...existingCredentials,
-        tuttiudAppJwt: appKey
-      }
-    }
+      body: JSON.stringify(payload)
+    })
 
-    const { error } = await client
-      .from('org_settings')
-      .update({ metadata: nextRaw })
-      .eq('org_id', orgId)
+    const data = (await response.json().catch(() => null)) as
+      | { success?: boolean; message?: string; metadata?: Record<string, unknown> | null }
+      | null
 
-    if (error) {
+    if (!response.ok || !data?.success) {
       throw {
-        message: 'לא הצלחנו לשמור את מפתח היישום. בדקו את החיבור ל-Supabase ונסו שוב.',
-        cause: error
+        message:
+          data?.message ??
+          'שמירת המפתח נכשלה. בדקו את פרטי החיבור או נסו מחדש לאחר הרצת סקריפט ההכנה.',
+        cause: data
       } satisfies SetupWizardError
     }
 
-    return normaliseMetadata(nextRaw)
-  })
+    return normaliseMetadata(data.metadata ?? null)
+  } catch (error) {
+    if ((error as SetupWizardError)?.message) {
+      throw error
+    }
+
+    throw {
+      message: 'לא הצלחנו לתקשר עם שרת האימות. ודאו שהחיבור תקין ונסו שוב.',
+      cause: error
+    } satisfies SetupWizardError
+  }
+}
 
 export const initializeSetupForOrganization = async (
   orgId: string
