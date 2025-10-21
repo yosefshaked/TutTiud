@@ -6,6 +6,7 @@
   - `src/lib` – low-level utilities, Supabase client factories, helpers.
   - `src/app` – routing, providers, layout.
   - `src/pages` – screen-level components.
-  - `src/components` – reusable UI elements.
+- `src/components` – reusable UI elements.
 - Do not import React components inside `src/lib` modules.
 - Run `npm run build` and `npx eslint .` before finishing any change.
+- **Schema integrity:** When working with tenant data databases, never read from, write to, create, or modify anything in the `public` schema. All TutTiud application logic must operate strictly within the `tuttiud` schema. This rule is mandatory and overrides other considerations.
