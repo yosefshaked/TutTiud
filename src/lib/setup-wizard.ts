@@ -19,7 +19,7 @@ export type OrganizationSetupSettings = {
   org_id: string | null
   supabase_url: string | null
   anon_key: string | null
-  last_synced_at: string | null
+  updated_at: string | null
   metadata: OrganizationSetupMetadata
 }
 
@@ -136,7 +136,7 @@ type OrgSettingsRow = {
   org_id?: string | null
   supabase_url?: string | null
   anon_key?: string | null
-  last_synced_at?: string | null
+  updated_at?: string | null
   metadata?: Record<string, unknown> | null
 }
 
@@ -183,9 +183,7 @@ export const fetchOrganizationSetupSettings = async (
   withClient(async (client) => {
     const response = await client
       .from('org_settings')
-      .select(
-        'org_id, supabase_url, anon_key, last_synced_at, metadata'
-      )
+      .select('org_id, supabase_url, anon_key, updated_at, metadata')
       .eq('org_id', orgId)
       .maybeSingle()
 
@@ -208,7 +206,7 @@ export const fetchOrganizationSetupSettings = async (
       org_id: normalizedOrgId,
       supabase_url: payload.supabase_url ?? null,
       anon_key: payload.anon_key ?? null,
-      last_synced_at: payload.last_synced_at ?? null,
+      updated_at: payload.updated_at ?? null,
       metadata: normaliseMetadata(payload.metadata)
     }
   })

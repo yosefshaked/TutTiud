@@ -407,10 +407,10 @@ export const SetupWizardPage = () => {
                     </dd>
                   </div>
                   <div className="flex flex-col gap-0.5 text-right">
-                    <dt className="font-semibold text-foreground">סנכרון אחרון</dt>
+                    <dt className="font-semibold text-foreground">עודכן לאחרונה</dt>
                     <dd>
-                      {organizationSettings.last_synced_at
-                        ? new Date(organizationSettings.last_synced_at).toLocaleString('he-IL')
+                      {organizationSettings.updated_at
+                        ? new Date(organizationSettings.updated_at).toLocaleString('he-IL')
                         : 'טרם סונכרן'}
                     </dd>
                   </div>
