@@ -10,7 +10,10 @@ import { AuthLoginPage } from '@/pages/auth-login'
 import { LandingPage } from '@/pages/landing'
 import { NotFoundPage } from '@/pages/not-found'
 import { OrganizationSelectorPage } from '@/pages/organization-selector'
+import { SessionRecordCreatePage } from '@/pages/session-record-create'
 import { SetupWizardPage } from '@/pages/setup-wizard'
+import { StudentsPage } from '@/pages/students'
+import { BackupPage } from '@/pages/backup'
 
 export const App = () => {
   return (
@@ -26,6 +29,9 @@ export const App = () => {
                 <Route element={<AppShell />}>
                   <Route index element={<LandingPage />} />
                   <Route path="setup-wizard" element={<SetupWizardPage />} />
+                  <Route path="students" element={<StudentsPage />} />
+                  <Route path="session-records/new" element={<SessionRecordCreatePage />} />
+                  <Route path="admin/backup" element={<BackupPage />} />
                 </Route>
               </Route>
             </Route>

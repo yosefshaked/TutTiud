@@ -11,11 +11,13 @@ TutTiud is a multi-tenant SaaS platform built for health and wellbeing organizat
 - Routing guards enforcing authentication and organization selection before accessing protected screens.
 - Interactive Setup Wizard page that loads organization metadata, presents a guided Step 1 with the canonical Tuttiud SQL setup script (v2.1) and schema exposure instructions, collects the generated `APP_DEDICATED_KEY` in Step 2, sends it to the secure Azure Function (`/api/store-tuttiud-app-key`) for encryption + storage before continuing with user-triggered initialization and automated schema/diagnostics checks.
 - Organization selector now inspects `org_settings.metadata.connections.tuttiud` to route users either back to their intended screen or into the Setup Wizard, and the wizard marks the connection as `"connected"` when all checks succeed.
+- Secure Backend-for-Frontend (Azure Functions) layer authenticating each request, storing the encrypted TutTiud app key, fetching instructor-specific students, creating session records with server-side authorization, and generating full JSON backups for admins/owners only.
+- New authenticated modules in the React client: a “My Students” view with refresh + call-to-action, a guided session-record form that posts to the BFF, an admin backup panel, and an updated landing page highlighting the onboarding flow.
 
 ## Next Steps (High-level)
 
-1. Implement secure API layer for privileged Supabase operations.
-2. Connect Control DB schemas once available and map membership queries accordingly.
-3. Extend the Setup Wizard with progress persistence, role-based enforcement, and backend orchestration.
-4. Expand module structure (Students, Session Summaries, Auditing, etc.).
+1. Expand role-based experiences (e.g., instructor session history, admin overviews) using the BFF pattern.
+2. Connect additional Control DB metadata (profiles, invitations) to enrich organization context.
+3. Extend the Setup Wizard with progress persistence, audit logging, and retry scheduling.
+4. Implement editing/review flows for existing session records and add student management tools.
 5. Add automated testing (unit + e2e) and CI workflows.

@@ -1,25 +1,9 @@
 /* eslint-env node */
-const nodeCrypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 
-const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-
-const deriveEncryptionKey = (secret) => {
-  if (!secret) {
-    throw new Error('Missing encryption secret')
-  }
-
-  try {
-    const decoded = Buffer.from(secret, 'base64')
-    if (decoded.length === 32) {
-      return decoded
-    }
-  } catch {
-    // Ignore and fall back to hash derivation
-  }
-
-  return nodeCrypto.createHash('sha256').update(secret).digest()
-}
+const { encryptValue } = require('../_shared/encryption')
+const { loadControlContext } = require('../_shared/tenant-context')
+const { isRecord, sendJson } = require('../_shared/utils')
 
 const buildStoredMetadata = (currentMetadata) => {
   const base = isRecord(currentMetadata) ? { ...currentMetadata } : {}
@@ -36,32 +20,20 @@ const buildStoredMetadata = (currentMetadata) => {
   }
 }
 
-const respond = (context, status, body) => {
-  context.res = {
-    status,
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body
-  }
-}
-
 module.exports = async function (context, req) {
   if (req.method !== 'POST') {
-    respond(context, 405, {
+    sendJson(context, 405, {
       success: false,
       message: 'Method not allowed'
     })
     return
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const encryptionSecret = process.env.APP_ORG_CREDENTIALS_ENCRYPTION_KEY
 
-  if (!supabaseUrl || !serviceRoleKey || !encryptionSecret) {
-    context.log('store-tuttiud-app-key: missing environment configuration')
-    respond(context, 500, {
+  if (!encryptionSecret) {
+    context.log('store-tuttiud-app-key: missing encryption configuration')
+    sendJson(context, 500, {
       success: false,
       message: 'הגדרת השרת אינה מלאה. פנו לתמיכה לקבלת סיוע.'
     })
@@ -75,23 +47,46 @@ module.exports = async function (context, req) {
   const currentMetadata = req.body?.currentMetadata ?? null
 
   if (!orgId || !appKey || !tenantSupabaseUrl) {
-    respond(context, 400, {
+    sendJson(context, 400, {
       success: false,
       message: 'חלק מהפרטים חסרים. ודאו שמזהה הארגון, כתובת Supabase והמפתח הוזנו כראוי ונסו שוב.'
     })
     return
   }
 
-  const adminClient = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false }
-  })
+  let controlContext
+  try {
+    controlContext = await loadControlContext(req, { orgId, requireRole: 'admin' })
+  } catch (error) {
+    if (error?.status) {
+      sendJson(context, error.status, {
+        success: false,
+        message: error.message
+      })
+      return
+    }
 
-  const encryptionKey = deriveEncryptionKey(encryptionSecret)
-  const iv = nodeCrypto.randomBytes(12)
-  const cipher = nodeCrypto.createCipheriv('aes-256-gcm', encryptionKey, iv)
-  const encrypted = Buffer.concat([cipher.update(appKey, 'utf8'), cipher.final()])
-  const authTag = cipher.getAuthTag()
-  const encryptedPayload = Buffer.concat([iv, authTag, encrypted]).toString('base64')
+    context.log('store-tuttiud-app-key: unexpected authentication error', error)
+    sendJson(context, 500, {
+      success: false,
+      message: 'לא ניתן היה לאמת את ההרשאות לפעולה זו. פנו לתמיכה לקבלת סיוע.'
+    })
+    return
+  }
+
+  const { adminClient } = controlContext
+
+  let encryptedPayload
+  try {
+    encryptedPayload = encryptValue(appKey, encryptionSecret)
+  } catch (error) {
+    context.log('store-tuttiud-app-key: encryption failed', error)
+    sendJson(context, 500, {
+      success: false,
+      message: 'הצפנת המפתח נכשלה. פנו לתמיכה לקבלת סיוע.'
+    })
+    return
+  }
 
   const { data: existingOrg, error: readOrgError } = await adminClient
     .from('organizations')
@@ -101,7 +96,7 @@ module.exports = async function (context, req) {
 
   if (readOrgError) {
     context.log('store-tuttiud-app-key: failed reading organization', readOrgError)
-    respond(context, 500, {
+    sendJson(context, 500, {
       success: false,
       message: 'קריאת פרטי הארגון נכשלה. נסו שוב בעוד מספר רגעים או פנו לתמיכה.'
     })
@@ -109,7 +104,7 @@ module.exports = async function (context, req) {
   }
 
   if (!existingOrg) {
-    respond(context, 404, {
+    sendJson(context, 404, {
       success: false,
       message: 'הארגון לא נמצא. בדקו שבחרתם את הארגון הנכון ונסו שוב.'
     })
@@ -123,7 +118,7 @@ module.exports = async function (context, req) {
 
   if (storeKeyError) {
     context.log('store-tuttiud-app-key: failed storing encrypted key', storeKeyError)
-    respond(context, 500, {
+    sendJson(context, 500, {
       success: false,
       message: 'שמירת מפתח היישום נכשלה. נסו שוב מאוחר יותר או פנו לתמיכה.'
     })
@@ -158,7 +153,7 @@ module.exports = async function (context, req) {
       context.log('store-tuttiud-app-key: failed reverting encrypted key after diagnostics error', revertError)
     }
 
-    respond(context, 400, {
+    sendJson(context, 400, {
       success: false,
       message:
         'לא ניתן היה לאמת את מפתח היישום מול מסד הנתונים. בדקו שהסקריפט הופעל בהצלחה ושהמפתח מעודכן.',
@@ -176,7 +171,7 @@ module.exports = async function (context, req) {
 
   if (metadataError) {
     context.log('store-tuttiud-app-key: failed updating metadata', metadataError)
-    respond(context, 500, {
+    sendJson(context, 500, {
       success: false,
       message:
         'המפתח אומת אך עדכון המטא־נתונים נכשל. נסו שוב או פנו לתמיכה עם שעת התקלה.'
@@ -184,7 +179,7 @@ module.exports = async function (context, req) {
     return
   }
 
-  respond(context, 200, {
+  sendJson(context, 200, {
     success: true,
     metadata: nextMetadata,
     diagnostics

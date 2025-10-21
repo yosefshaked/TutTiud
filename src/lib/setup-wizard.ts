@@ -284,6 +284,7 @@ export const saveTuttiudAppKey = async (
   options?: {
     currentMetadata?: Record<string, unknown> | null
     supabaseUrl?: string | null
+    accessToken?: string | null
   }
 ): Promise<OrganizationSetupMetadata> => {
   if (!orgId) {
@@ -299,11 +300,20 @@ export const saveTuttiudAppKey = async (
     currentMetadata: options?.currentMetadata ?? null
   }
 
+  const authToken = options?.accessToken?.trim() ?? ''
+
+  if (!authToken) {
+    throw {
+      message: 'תוקף ההתחברות פג. התחברו מחדש ונסו לשמור את מפתח היישום.'
+    } satisfies SetupWizardError
+  }
+
   try {
     const response = await fetch('/api/store-tuttiud-app-key', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`
       },
       body: JSON.stringify(payload)
     })

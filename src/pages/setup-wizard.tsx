@@ -273,7 +273,7 @@ const DiagnosticsSqlList = ({ snippets }: { snippets: DiagnosticsSqlSnippet[] })
 
 export const SetupWizardPage = () => {
   const navigate = useNavigate()
-  const { clientAvailable } = useAuth()
+  const { clientAvailable, session } = useAuth()
   const { selectedOrganization, status: organizationStatus } = useOrganization()
 
   const [initState, setInitState] = useState<StepState>({ status: 'idle' })
@@ -764,7 +764,8 @@ export const SetupWizardPage = () => {
     try {
       const metadata = await saveTuttiudAppKey(selectedOrganization.org_id, trimmedKey, {
         currentMetadata: organizationSettings.metadata.raw,
-        supabaseUrl: organizationSettings.supabase_url
+        supabaseUrl: organizationSettings.supabase_url,
+        accessToken: session?.access_token ?? null
       })
 
       setOrganizationSettings((previous) => {
@@ -793,7 +794,7 @@ export const SetupWizardPage = () => {
         error: formatTechnicalDetails(keyError.cause)
       })
     }
-  }, [appKeyInput, organizationSettings, selectedOrganization])
+  }, [appKeyInput, organizationSettings, selectedOrganization, session?.access_token])
 
   const handleRequestValidation = useCallback(() => {
     if (!selectedOrganization) {
