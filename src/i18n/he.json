@@ -1,0 +1,19 @@
+{
+  "delete.title": "מחיקה לצמיתות",
+  "delete.subtitle": "הפעולה בלתי הפיכה. כדי לאשר כתבו 'מחק' בשדה הבא ולחצו מחק לצמיתות.",
+  "delete.input.placeholder": "הקלד/י: מחק",
+  "delete.primary": "מחק לצמיתות",
+  "delete.cancel": "ביטול",
+  "delete.summary.global": "{{employee}} • {{date}} • {{entryType}}",
+  "delete.summary.day": "המחיקה תסיר את כל הרישומים לאותו יום ({{count}} קטעים).",
+  "toast.delete.success": "הרישום נמחק.",
+  "toast.delete.error": "מחיקה נכשלה, נסו שוב.",
+  "kpi.hoursCard.hourly": "שעות עובדים שעתיים",
+  "kpi.hoursCard.meetings": "שעות מפגשים (מוערך)",
+  "kpi.hoursCard.global": "שעות עובדים גלובליים",
+  "kpi.hoursCard.total": "סך כל השעות",
+  "tooltip.hoursCard.hourly": "סכימת שעות עבודה שנרשמו לעובדים שעתיים בטווח הנבחר.",
+  "tooltip.hoursCard.meetings": "הערכה לפי משך השירותים שהוזנו לכל מפגש.",
+  "tooltip.hoursCard.global": "סכימת קטעי שעות שנרשמו לעובדים גלובליים (ללא ימי חופשה בתשלום)",
+  "error.paidLeaveRequiresEmpty": "יש למחוק את כל הרישומים לפני סימון היום כחופשה בתשלום"
+}

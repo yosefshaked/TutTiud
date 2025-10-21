@@ -1,0 +1,53 @@
+{
+  "name": "Employee",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "שם העובד"
+    },
+    "employee_id": {
+      "type": "string",
+      "description": "מספר עובד"
+    },
+    "employee_type": {
+      "type": "string",
+      "enum": [
+        "hourly",
+        "instructor"
+      ],
+      "description": "סוג עובד - שעתי או מדריך"
+    },
+    "current_rate": {
+      "type": "number",
+      "description": "תעריף נוכחי"
+    },
+    "phone": {
+      "type": "string",
+      "description": "טלפון"
+    },
+    "email": {
+      "type": "string",
+      "description": "אימייל"
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date",
+      "description": "תאריך התחלת עבודה"
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true,
+      "description": "האם העובד פעיל"
+    },
+    "notes": {
+      "type": "string",
+      "description": "הערות"
+    }
+  },
+  "required": [
+    "name",
+    "employee_type",
+    "current_rate"
+  ]
+}

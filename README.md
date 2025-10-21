@@ -1,107 +1,85 @@
-# TutTiud
+# Employee Management
 
-TutTiud הוא יישום SaaS לניהול ותיעוד פגישות מודרכות בארגוני בריאות ורווחה. הפרויקט נבנה באמצעות Vite, React, Tailwind CSS, ו-Supabase.
+This project is a Vite + React application for managing employees, work sessions and payroll records. Supabase provides persistence and authentication.
 
-## Prerequisites
+## Key UI behavior
 
-- Node.js 20+
-- npm 10+
+- The **Vacations & Holidays** tab on the Employees page is an informational overview with collapsible history rows. All leave entries must be created or updated from the dedicated **Time Entry** screen.
+- Creating leave from Time Entry always writes both a `WorkSessions` row and a linked `LeaveBalances` ledger entry (`work_session_id`), and the secure API keeps the two tables synchronized on delete/restore actions.
+- Organization invitations (sending, listing, accepting, declining, and revoking) flow through the privileged Azure Function at `/api/invitations`, which validates admin permissions against `org_memberships`, auto-expires stale rows, and updates statuses (`pending`, `accepted`, `declined`, `revoked`, `expired`, `failed`).
+- Admins and owners can send invites from **Settings → Org Members**, which surfaces a toast-enabled form, loads pending invitations on mount, and lets them revoke invites with inline loading states while members see a read-only directory.
+- Invitation emails now send new users to the branded `/#/complete-registration` flow, which verifies the Supabase invite token, collects a new password, and forwards the original `invitation_token` to `/#/accept-invite` for final acceptance.
+- The `/#/accept-invite` experience validates the invitation token, surfaces login/registration calls to action when no session exists, blocks mismatched accounts until they sign out, and lets the correct user accept (redirecting to the Dashboard) or decline the invite via the secure `/api/invitations` endpoints.
 
-## Getting Started
+## Local development
 
-1. התקן תלויות:
+1. Install dependencies:
    ```bash
    npm install
    ```
-2. העתק את קובץ ההגדרות והשלם את הפרטים מסביבת Supabase:
-   ```bash
-   cp .env.example .env.local
+2. Create `api/local.settings.json` with your Supabase credentials:
+   ```json
+   {
+     "IsEncrypted": false,
+     "Values": {
+       "APP_SUPABASE_URL": "https://your-project.supabase.co",
+       "APP_SUPABASE_ANON_KEY": "public-anon-key",
+       "APP_SUPABASE_SERVICE_ROLE": "service-role-key-with-org-access"
+     }
+   }
    ```
-3. עדכן את המפתחות `VITE_SUPABASE_URL` ו-`VITE_SUPABASE_ANON_KEY` בקובץ החדש.
-4. הפעל את סביבת הפיתוח:
+3. Start the Vite dev server:
    ```bash
    npm run dev
    ```
-5. פתח את הדפדפן בכתובת [http://localhost:5173](http://localhost:5173).
+4. In another terminal launch the Azure Static Web Apps emulator so `/api/config` is available:
+   ```bash
+   swa start http://localhost:5173 --api-location api
+   ```
 
-## Available Scripts
+## Building for Azure Static Web Apps
 
-- `npm run dev` – מפעיל את סביבת הפיתוח.
-- `npm run build` – בונה את היישום לפרודקשן.
-- `npm run preview` – מציג תצוגה מקדימה של הבנייה.
-- `npm run lint` – מפעיל את ESLint על כל הקבצים.
+The production build uses the standard Vite flow:
 
-## Project Structure
-
-```
-src/
-  app/            # הגדרות ניתוב, פרוביידרים ופריסת האפליקציה
-  components/     # רכיבי UI כולל בסיס shadcn/ui
-  hooks/          # הוקים לשימוש חוזר (למשל אחסון מקומי)
-  lib/            # כלים ולקוחות לשימוש בשכבות נמוכות
-  pages/          # עמודים ורכיבי ניתוב ברמת מסך
-  types/          # טיפוסים משותפים
+```bash
+npm run build
 ```
 
-## RTL & Hebrew Support
+The command outputs static assets to the `dist/` directory. Configure Azure Static Web Apps with `app_location: "/"`, `output_location: "dist"`, `api_location: "api"`, and `npm run build` as the build command.
 
-- הממשק מוגדר בברירת המחדל לכיוון RTL עם גופנים ידידותיים לעברית.
-- כל המסכים הראשוניים מוצגים בשפה העברית.
+## Runtime configuration
 
-## Supabase Configuration
+At bootstrap the SPA calls the Azure Function `GET /api/config`. Without credentials the function returns the core Supabase URL and anon key defined by `APP_SUPABASE_URL` and `APP_SUPABASE_ANON_KEY`.
 
-היישום עושה שימוש ב-`@supabase/supabase-js` בלבד. יש להגדיר מפתחות אנונימיים ברמת ה-Front-End בלבד. מפתחות בעלי הרשאות כתיבה חייבים להיות מאוחסנים בצד השרת ולהיחשף באמצעות API מאובטח בלבד.
+After the user signs in and selects an organization the client issues `GET /api/org/<org-id>/keys` with the header `X-Supabase-Authorization: Bearer <supabase_access_token>`. The API forwards the token to the Control database RPC `public.get_org_public_keys`, which verifies the caller’s membership before returning the organization’s `supabase_url` and `anon_key`. Missing or invalid tokens yield `401`, while users outside the organization receive `403` or `404`.
 
-## 🔧 Azure Deployment: Environment Variables
+Visit `/#/diagnostics` in development to review the last configuration request (endpoint, org id, HTTP status, and request scope). Secrets are masked except for the last four characters.
 
-> `.env.local` נועד לסביבת פיתוח מקומית בלבד. בסביבת Azure Static Web Apps יש להגדיר את משתני `VITE_*` דרך הגדרות הענן כדי שיקומפלו בזמן הבנייה.
+If either `/api/config` or `/api/org/:id/keys` is unreachable or returns non-JSON content the UI shows a blocking error screen in Hebrew with recovery steps.
 
-- עבור פיתוח מקומי: ערוך את הקובץ `.env.local` והזן את הערכים הדרושים.
-- עבור פריסה ב-Azure: היכנס אל **Azure Portal → Static Web App → Configuration → Application settings** והוסף שם את המשתנים הבאים, או עדכן אותם בקובץ ה-Workflow של GitHub ש-Azure יוצר (`azure-static-web-apps.yml`).
-  - `VITE_SUPABASE_URL`
-  - `VITE_SUPABASE_ANON_KEY`
-- לאחר כל שינוי במשתנים יש לבצע Redeploy (או להריץ מחדש את ה-Workflow) כדי שהשינויים ייכנסו לבילד.
+## Bootstrap flow
 
-- עבור פונקציות ה-Azure (Function App): היכנס אל **Azure Portal → Function App → Configuration → Application settings** והוסף את המשתנים הבאים עם הערכים מה-Control DB ומהמערכת המארחת.
-  - `SUPABASE_URL` – כתובת ה-Control DB לשימוש עם מפתח ה-Service Role.
-  - `SUPABASE_SERVICE_ROLE_KEY` – מפתח ה-Service Role של Supabase שמאפשר לפונקציות להפעיל RPC מאובטח.
-  - `APP_ORG_CREDENTIALS_ENCRYPTION_KEY` – סוד סימטרי להצפנת מפתח היישום של כל ארגון.
-- לאחר שמירת המשתנים לחץ על **Save** ו-**Restart** כדי שהפונקציות ייטענו מחדש עם ההגדרות החדשות. ללא שלושת הערכים הללו פונקציית `/api/store-tuttiud-app-key` תחזיר הודעת שגיאה ולא תשמור את המפתח.
+Runtime credentials must be resolved before the React tree renders. The bootstrap script performs the following steps:
 
-למידע מפורט נוסף וצילומי מסך, ראה/י את מדריך ההקמה המלא בקובץ [`ProjectDocs/setup.md`](ProjectDocs/setup.md#azure-static-web-apps) המתעד גם בעברית וגם באנגלית את תהליך ההזנה של משתני Azure.
+1. Fetch `/api/config` and await the JSON response.
+2. Call `initializeAuthClient(config)` from `src/lib/supabase-manager.js` to hydrate the shared Supabase auth singleton.
+3. Render the application once `getAuthClient()` succeeds, passing the resolved config into the runtime providers.
 
-## אשף ההקמה (Setup Wizard)
+Do not instantiate Supabase clients manually. Components should access the control client through `getAuthClient()` or `useSupabase()` and rely on the hook’s `dataClient` for organization-specific data access.
 
-- בעת הטעינה האשף פונה ל-`/api/setup-status` (פונקציית Azure חדשה) כדי לבדוק אם קיים ערך מוצפן בעמודת `organizations.dedicated_key_encrypted`. התוצאה קובעת אם המשתמש יראה מסלול "חדש" או "חוזר".
-- אם נמצא מפתח שמור, מוצג כרטיס "ברוכים השבים" וכפתור "אימות ההגדרה". לחיצה עליו מריצה את `/api/verify-tuttiud-setup`, שמפענחת את המפתח הקיים ומריצה את `tuttiud.setup_assistant_diagnostics` לפני המשך הבדיקות.
-- ארגון חדש (ללא מפתח שמור) ממשיך למסלול המלא: **שלב 0** מציג צ'ק-ליסט חשיפה/סקריפט/העתקת המפתח וייפתח רק לאחר שכל המשימות סומנו. **שלב 1** מאפשר להדביק את `APP_DEDICATED_KEY` ולשמור אותו דרך `/api/store-tuttiud-app-key` (שמעדכנת גם את `org_settings.metadata`).
-- אם אימות המפתח הקיים נכשל, האשף מחזיר את המשתמש לשלבי ההכנה אך מותיר רק את פעולת הרצת הסקריפט (המערכת מזכירה שהמפתח כבר שמור ולכן לא מוצג שלב הזנה נוסף).
-- **שלב 2** מאחד את שני העולמות: ארגונים חוזרים מריצים אימות בלבד בעוד ארגונים חדשים מריצים `setup_assistant_initialize`. לאחר מכן מתבצעים תמיד בדיקות ה-`schema_status` והדיאגנוסטיקה, ולבסוף `updateTuttiudConnectionStatus` מסמן את החיבור כ-`connected` כאשר כל השלבים מצליחים.
-- מסך בחירת הארגון עדיין מפנה לאשף כאשר `metadata.connections.tuttiud` אינו `"connected"`, כך שאף ארגון לא מדלג בטעות על המסלול המתאים לו.
+## Supabase guardrails for contributors
 
-## שכבת BFF מאובטחת (Azure Functions)
+- Reuse the shared clients from `src/lib/supabase-manager.js`: call `getAuthClient()` for the persistent control-database singleton and rely on the organization data helpers provided by `useSupabase()` (e.g., `dataClient`) for tenant data. ESLint forbids importing `createClient` directly, so extend the manager if additional behavior is required.
+- Normalize thrown values with `asError` from `src/lib/error-utils.js` or dedicated error classes. Do not assign to `error.name` or mutate built-in error properties—linting will fail if you do.
+- When touching Supabase runtime flows run `npm run build` and `node --test` to ensure the guardrails and helper tests still pass.
+- Run `npm run dep:check` before committing to ensure no circular dependencies were introduced. The check wraps Madge with the same alias configuration used by Vite, so failures point at real module cycles.
 
-- הפונקציה `/api/store-tuttiud-app-key` מחייבת כעת אימות משתמש, מצפינה את מפתח היישום ושומרת אותו בעמודת `organizations.dedicated_key_encrypted` רק עבור מנהלים ובעלי מערכת.
-- פונקציות `/api/setup-status` ו-`/api/verify-tuttiud-setup` מריצות את בדיקות ההקמה הראשוניות ומאפשרות לאשף להבדיל בין ארגונים חדשים לחוזרים.
-- נוספו שלושה קצות API ייעודיים הפועלים מול מסד הנתונים הייעודי של הארגון בסכימת `tuttiud`:
-  - `GET /api/students` – מחזיר את התלמידים המשויכים למדריך המחובר.
-  - `POST /api/session-records` – יוצר תיעוד מפגש חדש לאחר וידוא שהמדריך אכן משויך לתלמיד שנבחר.
-  - `GET /api/backup` – מפיק קובץ גיבוי מלא של הטבלאות המרכזיות וזמין למנהלים/בעלים בלבד.
-- כל הפונקציות מאמתות את המשתמש מול ה-Control DB, מפענחות את מפתח היישום דרך משתנה הסביבה `APP_ORG_CREDENTIALS_ENCRYPTION_KEY`, ומבצעות פעולות בלעדית בסכימת `tuttiud` בהתאם למדיניות ה־schema.
+## Health check endpoint
 
-## חוויית משתמש חדשה במודולים הראשיים
+Azure Static Web Apps automatically deploys Azure Functions inside the `api/` directory. The `/api/healthcheck` function responds with:
 
-- בעמוד "התלמידים שלי" מוצג כעת כרטיס חכם לכל תלמיד משויך עם אפשרות לרענון וריצת תהליך יצירת מפגש חדש.
-- עמוד "יצירת תיעוד מפגש" (Step-by-step) מנחה את המדריך לבחור תלמיד, לבחור תאריך ולתעד את תוכן המפגש, תוך שימוש ב־API המאובטח.
-- עמוד "גיבוי נתונים" מאפשר למנהלים להפיק קובץ JSON מאובטח להורדה עם כל הנתונים החיוניים.
-- ה־Landing Page מציג קישורים מהירים ואבני דרך לעבודה השוטפת לאחר ההגדרה הראשונית.
+```json
+{ "ok": true }
+```
 
-## Documentation
-
-- מסמכי תהליך ורקע נוספים זמינים תחת התיקייה `ProjectDocs/` (עברית ואנגלית).
-- מדריך הקמה מלא (Setup) זמין בקובץ [`ProjectDocs/setup.md`](ProjectDocs/setup.md) וכולל הוראות מפורטות באנגלית ועברית לפריסה ותחזוקה.
-- הנחיות עבור סוכני AI זמינות בקובץ `AGENTS.md` בשורש המאגר.
-
-## License
-
-© TutTiud. כל הזכויות שמורות.
+Use this endpoint for platform health probes after deploying to Azure Static Web Apps.

@@ -1,8 +1,10 @@
 {
-  "name": "tuttiud-api",
-  "version": "0.1.0",
+  "name": "tutrate-api",
+  "type": "module",
+  "version": "1.0.0",
   "private": true,
+  "engines": { "node": ">=18 <20" },
   "dependencies": {
-    "@supabase/supabase-js": "^2.47.6"
+    "@supabase/supabase-js": "^2.45.0"
   }
 }

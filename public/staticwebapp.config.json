@@ -1,0 +1,27 @@
+{
+  "routes": [
+    {
+      "route": "/api/config",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": ["anonymous", "authenticated"]
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "/api/*"]
+  },
+  "platform": {
+    "api_location": "api"
+  },
+  "api": {
+    "cors": {
+      "allowedOrigins": [
+        "https://tutrate.thepcrunners.com",
+        "https://green-dune-05f6e103.westeurope.1.azurestaticapps.net"
+      ]
+    }
+  }
+}

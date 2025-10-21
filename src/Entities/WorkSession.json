@@ -1,0 +1,56 @@
+{
+  "name": "WorkSession",
+  "type": "object",
+  "properties": {
+    "employee_id": {
+      "type": "string",
+      "description": "מזהה העובד"
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "תאריך העבודה"
+    },
+    "session_type": {
+      "type": "string",
+      "enum": [
+        "hourly",
+        "session_30",
+        "session_45",
+        "session_150"
+      ],
+      "description": "סוג המשמרת - שעתי, 30 דקות, 45 דקות, 2.5 שעות"
+    },
+    "hours": {
+      "type": "number",
+      "description": "כמות שעות (לעובדים שעתיים)"
+    },
+    "sessions_count": {
+      "type": "integer",
+      "description": "כמות מפגשים"
+    },
+    "students_count": {
+      "type": "integer",
+      "description": "כמות תלמידים (למפגשי 45 דקות)"
+    },
+    "rate_used": {
+      "type": "number",
+      "description": "התעריף שהיה בזמן ביצוע העבודה"
+    },
+    "total_payment": {
+      "type": "number",
+      "description": "סך התשלום"
+    },
+    "notes": {
+      "type": "string",
+      "description": "הערות"
+    }
+  },
+  "required": [
+    "employee_id",
+    "date",
+    "session_type",
+    "rate_used",
+    "total_payment"
+  ]
+}

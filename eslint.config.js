@@ -2,42 +2,77 @@ import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
-import tseslint from 'typescript-eslint'
+import { defineConfig, globalIgnores } from 'eslint/config'
+import importPlugin from 'eslint-plugin-import'
 
-export default tseslint.config(
+export default defineConfig([
+  globalIgnores(['dist']),
   {
-    ignores: ['dist', 'node_modules', 'vite.config.d.ts']
-  },
-  js.configs.recommended,
-  ...tseslint.configs.recommended,
-  {
+    files: ['**/*.{js,jsx}'],
+    extends: [
+      js.configs.recommended,
+      reactHooks.configs['recommended-latest'],
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        ecmaFeatures: { jsx: true },
+        sourceType: 'module',
+      },
+    },
     plugins: {
-      'react-hooks': reactHooks,
-      'react-refresh': reactRefresh
+      import: importPlugin,
     },
-    languageOptions: {
-      ecmaVersion: 2023,
-      globals: {
-        ...globals.browser
-      }
+    settings: {
+      'import/resolver': {
+        node: {
+          extensions: ['.js', '.jsx', '.mjs'],
+        },
+        alias: {
+          map: [['@', './src']],
+          extensions: ['.js', '.jsx', '.mjs'],
+        },
+      },
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
-      '@typescript-eslint/no-unused-expressions': 'off',
-      'react-refresh/only-export-components': 'off'
-    }
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'import/no-cycle': ['error', { maxDepth: Infinity }],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "AssignmentExpression[left.type='MemberExpression'][left.property.name='name']",
+          message: 'Do not assign to .name; use asError() or define a custom error class instead.',
+        },
+      ],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@supabase/supabase-js',
+              importNames: ['createClient'],
+              message:
+                "Do not import createClient directly. Call initializeAuthClient()/getAuthClient() from 'src/lib/supabase-manager.js'.",
+            },
+          ],
+        },
+      ],
+    },
   },
   {
-    files: ['api/**/*.js'],
-    languageOptions: {
-      ecmaVersion: 2023,
-      sourceType: 'commonjs',
-      globals: {
-        ...globals.node
-      }
-    },
+    files: ['api/**/*.{js,jsx,mjs}', 'scripts/**/*.{js,mjs}'],
     rules: {
-      '@typescript-eslint/no-require-imports': 'off'
-    }
-  }
-)
+      'no-restricted-imports': 'off',
+    },
+  },
+  {
+    files: ['src/lib/supabase-manager.js'],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
+])

@@ -1,0 +1,28 @@
+{
+  "name": "RateHistory",
+  "type": "object",
+  "properties": {
+    "employee_id": {
+      "type": "string",
+      "description": "מזהה העובד"
+    },
+    "rate": {
+      "type": "number",
+      "description": "תעריף"
+    },
+    "effective_date": {
+      "type": "string",
+      "format": "date",
+      "description": "תאריך תחילת התעריף"
+    },
+    "notes": {
+      "type": "string",
+      "description": "הערות על שינוי התעריף"
+    }
+  },
+  "required": [
+    "employee_id",
+    "rate",
+    "effective_date"
+  ]
+}
