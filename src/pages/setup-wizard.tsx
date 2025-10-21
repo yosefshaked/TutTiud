@@ -165,17 +165,24 @@ export const SetupWizardPage = () => {
           return
         }
 
-        const initResult = await initializeSetupForOrganization(orgId)
-        setInitState({
-          status: initResult.initialized ? 'success' : 'error',
-          message:
-            initResult.message ??
-            (initResult.initialized
-              ? 'התחברנו למסד הנתונים בהצלחה.'
-              : 'לא הצלחנו להתחבר למסד הנתונים. בדקו את ההגדרות ונסו שוב.')
-        })
-        if (!initResult.initialized) {
-          return
+        if (settings.metadata.connections.tuttiud === 'connected') {
+          setInitState({
+            status: 'success',
+            message: 'החיבור למסד הנתונים כבר פעיל. נוודא שהכל עדיין תקין.'
+          })
+        } else {
+          const initResult = await initializeSetupForOrganization(orgId)
+          setInitState({
+            status: initResult.initialized ? 'success' : 'error',
+            message:
+              initResult.message ??
+              (initResult.initialized
+                ? 'התחברנו למסד הנתונים בהצלחה.'
+                : 'לא הצלחנו להתחבר למסד הנתונים. בדקו את ההגדרות ונסו שוב.')
+          })
+          if (!initResult.initialized) {
+            return
+          }
         }
       } catch (error) {
         const setupError = error as SetupWizardError

@@ -250,7 +250,7 @@ export const initializeSetupForOrganization = async (
 ): Promise<{ initialized: boolean; message?: string }> =>
   withClient(async (client) => {
     try {
-      const { data, error } = await client.rpc('setup_assistant_initialize', {
+      const { data, error } = await client.rpc('tuttiud.setup_assistant_initialize', {
         org_id: orgId
       })
 
@@ -268,7 +268,7 @@ export const initializeSetupForOrganization = async (
       if (isPostgrestMissingFunction(error)) {
         throw {
           message:
-            'תהליך ההתחלה של TutTiud לא הותקן ב-Supabase. אנא פרסו את ההרחבות הנדרשות ונסו שוב.',
+            'תהליך ההתחלה של TutTiud לא הותקן בסכימת tuttiud של Supabase. אנא פרסו את ההרחבות הנדרשות ונסו שוב.',
           cause: error
         } satisfies SetupWizardError
       }
