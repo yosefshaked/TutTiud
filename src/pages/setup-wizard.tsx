@@ -293,6 +293,13 @@ export const SetupWizardPage = () => {
     status: 'idle'
   })
   const [needsPreparation, setNeedsPreparation] = useState(false)
+  const [preparationState, setPreparationState] = useState<StepState>({ status: 'idle' })
+  const [preparationChecklist, setPreparationChecklist] = useState({
+    schemaExposed: false,
+    scriptExecuted: false,
+    keyCaptured: false
+  })
+  const [preparationAcknowledged, setPreparationAcknowledged] = useState(false)
   const [preparationDetails, setPreparationDetails] = useState<string | null>(null)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [appKeyInput, setAppKeyInput] = useState('')
@@ -307,16 +314,86 @@ export const SetupWizardPage = () => {
   const tuttiudStatus = organizationSettings?.metadata.connections.tuttiud ?? null
   const hasStoredAppKey = Boolean(organizationSettings?.metadata.credentials.tuttiudAppJwt)
   const shouldShowPreparationGuide = needsPreparation
-  const shouldShowAppKeyStep = shouldShowPreparationGuide || !hasStoredAppKey
+  const shouldShowAppKeyStep =
+    !shouldShowPreparationGuide || preparationAcknowledged || hasStoredAppKey
   const diagnosticsSeverity = diagnosticsState.diagnostics?.status ?? null
   const diagnosticsIssues = diagnosticsState.diagnostics?.issues ?? []
   const diagnosticsSql = diagnosticsState.diagnostics?.sqlSnippets ?? []
   const isValidationLoading = initState.status === 'loading'
   const canRequestValidation =
     Boolean(selectedOrganization && organizationSettings) &&
+    (!shouldShowPreparationGuide || preparationAcknowledged) &&
     (tuttiudStatus === 'connected' || hasStoredAppKey)
+  const isPreparationChecklistComplete =
+    preparationChecklist.schemaExposed &&
+    preparationChecklist.scriptExecuted &&
+    preparationChecklist.keyCaptured
   const isSettingsLoaded = Boolean(organizationSettings)
   const isConnectionUpdateLoading = connectionUpdateState.status === 'loading'
+
+  const resetPreparationChecklist = useCallback(() => {
+    setPreparationChecklist({
+      schemaExposed: false,
+      scriptExecuted: false,
+      keyCaptured: false
+    })
+    setPreparationAcknowledged(false)
+  }, [])
+
+  const updatePreparationChecklist = useCallback(
+    (key: keyof typeof preparationChecklist, checked: boolean) => {
+      setPreparationChecklist((current) => {
+        const next = {
+          ...current,
+          [key]: checked
+        }
+
+        if (!(next.schemaExposed && next.scriptExecuted && next.keyCaptured)) {
+          setPreparationAcknowledged(false)
+          setPreparationState((previous) =>
+            previous.status === 'success'
+              ? {
+                  status: 'idle',
+                  message: 'השלימו את הצעדים הידניים כדי להמשיך לשלב 1.',
+                  error: undefined
+                }
+              : previous
+          )
+        }
+
+        return next
+      })
+    },
+    []
+  )
+
+  const requireManualPreparation = useCallback(
+    (state?: StepState) => {
+      setNeedsPreparation(true)
+      resetPreparationChecklist()
+      setPreparationState(
+        state ?? {
+          status: 'idle',
+          message: 'השלימו את הצעדים הידניים כדי שנוכל להמשיך לאימות החיבור.',
+          error: undefined
+        }
+      )
+    },
+    [resetPreparationChecklist]
+  )
+
+  const markPreparationSatisfied = useCallback(
+    (message?: string) => {
+      setNeedsPreparation(false)
+      setPreparationState({
+        status: 'success',
+        message: message ?? 'שלב ההכנה הושלם. ניתן להתקדם לבדיקה המלאה.',
+        error: undefined
+      })
+      setPreparationAcknowledged(true)
+    },
+    []
+  )
 
   useEffect(() => {
     if (!readyToStart || !selectedOrganization) return
@@ -335,7 +412,12 @@ export const SetupWizardPage = () => {
         setOrganizationSettings(settings)
 
         if (!settings) {
-          setNeedsPreparation(true)
+          requireManualPreparation({
+            status: 'warning',
+            message:
+              'לא הצלחנו למצוא את הגדרות החיבור של הארגון. אנא צרו קשר עם התמיכה של TutTiud.',
+            error: undefined
+          })
           setAppKeyInput('')
           setAppKeyState({ status: 'idle' })
           setInitState({
@@ -366,7 +448,7 @@ export const SetupWizardPage = () => {
         }
 
         if (settings.metadata.connections.tuttiud === 'connected') {
-          setNeedsPreparation(false)
+          markPreparationSatisfied('החיבור למסד הנתונים כבר פעיל. נריץ בדיקות לוודא שהכל תקין.')
           setInitState({
             status: 'success',
             message: 'החיבור למסד הנתונים כבר פעיל. נריץ בדיקות לוודא שהכל תקין.',
@@ -374,11 +456,16 @@ export const SetupWizardPage = () => {
           })
           setValidationTrigger((current) => current ?? 'auto')
         } else {
-          setNeedsPreparation(true)
+          requireManualPreparation({
+            status: 'idle',
+            message:
+              'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
+            error: undefined
+          })
           setInitState({
             status: 'idle',
             message:
-              'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 1 והזינו את מפתח היישום בשלב 2.',
+              'לפני שנבדוק את החיבור, הכינו את מסד הנתונים לפי ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
             error: undefined
           })
         }
@@ -399,7 +486,13 @@ export const SetupWizardPage = () => {
     return () => {
       isActive = false
     }
-  }, [readyToStart, selectedOrganization, refreshToken])
+  }, [
+    markPreparationSatisfied,
+    readyToStart,
+    refreshToken,
+    requireManualPreparation,
+    selectedOrganization
+  ])
 
   const runValidation = useCallback(
     async (origin: 'auto' | 'manual') => {
@@ -425,7 +518,11 @@ export const SetupWizardPage = () => {
         setOrganizationSettings(settings)
 
         if (!settings) {
-          setNeedsPreparation(true)
+          requireManualPreparation({
+            status: 'warning',
+            message: 'לא נמצאו הגדרות חיבור לארגון. פנו לתמיכת TutTiud להמשך טיפול.',
+            error: undefined
+          })
           setAppKeyState({ status: 'idle' })
           setInitState({
             status: 'warning',
@@ -451,7 +548,11 @@ export const SetupWizardPage = () => {
                 }
           )
         } else if (!isAlreadyConnected) {
-          setNeedsPreparation(true)
+          requireManualPreparation({
+            status: 'error',
+            message: 'הדביקו ושמרו את מפתח APP_DEDICATED_KEY לפני בדיקת החיבור.',
+            error: undefined
+          })
           setAppKeyState({
             status: 'error',
             message: 'הדביקו ושמרו את מפתח APP_DEDICATED_KEY לפני בדיקת החיבור.',
@@ -459,14 +560,14 @@ export const SetupWizardPage = () => {
           })
           setInitState({
             status: 'error',
-            message: 'חסר מפתח יישום. השלימו את שלב 2 ונסו שוב.',
+            message: 'חסר מפתח יישום. השלימו את שלב 1 ונסו שוב.',
             error: undefined
           })
           return
         }
 
         if (isAlreadyConnected) {
-          setNeedsPreparation(false)
+          markPreparationSatisfied('החיבור כבר אושר בעבר. נמשיך לבדיקות משלימות.')
           setInitState({
             status: 'success',
             message: 'החיבור כבר אושר בעבר. נמשיך לבדיקות משלימות.',
@@ -477,7 +578,13 @@ export const SetupWizardPage = () => {
             const initResult = await initializeSetupForOrganization(orgId)
 
             if (!initResult.initialized) {
-              setNeedsPreparation(true)
+              requireManualPreparation({
+                status: 'error',
+                message:
+                  initResult.message ??
+                  'לא הצלחנו להתחבר למסד הנתונים. בדקו את ההרשאות ונסו שוב.',
+                error: undefined
+              })
               setInitState({
                 status: 'error',
                 message:
@@ -488,7 +595,7 @@ export const SetupWizardPage = () => {
               return
             }
 
-            setNeedsPreparation(false)
+            markPreparationSatisfied(initResult.message ?? 'התחברנו למסד הנתונים בהצלחה.')
             setInitState({
               status: 'success',
               message: initResult.message ?? 'התחברנו למסד הנתונים בהצלחה.',
@@ -497,7 +604,11 @@ export const SetupWizardPage = () => {
           } catch (error) {
             const setupError = error as SetupWizardError
             if (setupError.kind === 'missing-function') {
-              setNeedsPreparation(true)
+              requireManualPreparation({
+                status: 'warning',
+                message: 'נדרש להריץ את סקריפט ההתקנה של TutTiud לפני שנוכל להמשיך.',
+                error: undefined
+              })
               setPreparationDetails(formatTechnicalDetails(setupError.cause))
               setInitState({
                 status: 'warning',
@@ -583,7 +694,7 @@ export const SetupWizardPage = () => {
         })
       }
     },
-    [selectedOrganization]
+    [markPreparationSatisfied, requireManualPreparation, selectedOrganization]
   )
 
   useEffect(() => {
@@ -721,6 +832,19 @@ export const SetupWizardPage = () => {
     }
   }, [])
 
+  const handlePreparationContinue = useCallback(() => {
+    if (!isPreparationChecklistComplete) {
+      return
+    }
+
+    setPreparationAcknowledged(true)
+    setPreparationState({
+      status: 'success',
+      message: 'סימנתם שהשלמתם את שלב ההכנה. עברו לשלב 1 להזנת המפתח.',
+      error: undefined
+    })
+  }, [isPreparationChecklistComplete])
+
   const handleSaveAppKey = useCallback(async () => {
     if (!selectedOrganization) {
       return
@@ -801,6 +925,15 @@ export const SetupWizardPage = () => {
       return
     }
 
+    if (shouldShowPreparationGuide && !preparationAcknowledged) {
+      setPreparationState({
+        status: 'error',
+        message: 'סמנו שסיימתם את הצעדים הידניים לפני בדיקת החיבור.',
+        error: undefined
+      })
+      return
+    }
+
     if (shouldShowPreparationGuide && !hasStoredAppKey) {
       setAppKeyState({
         status: 'error',
@@ -811,7 +944,12 @@ export const SetupWizardPage = () => {
     }
 
     setValidationTrigger('manual')
-  }, [hasStoredAppKey, selectedOrganization, shouldShowPreparationGuide])
+  }, [
+    hasStoredAppKey,
+    preparationAcknowledged,
+    selectedOrganization,
+    shouldShowPreparationGuide
+  ])
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col gap-6 bg-muted/30 px-4 py-8">
@@ -832,25 +970,101 @@ export const SetupWizardPage = () => {
           </CardHeader>
           <CardContent className="space-y-6">
             {shouldShowPreparationGuide && (
-              <section className="space-y-3 rounded-lg border border-primary/40 bg-primary/10 p-4">
-                <header className="flex flex-col gap-1 text-right">
-                  <h2 className="text-lg font-semibold text-primary">שלב 1 — הכנת מסד הנתונים</h2>
-                  <p className="text-sm text-muted-foreground">
-                    לפני בדיקת החיבור, ודאו שהסכימה tuttiud חשופה דרך הגדרות ה-API והריצו את סקריפט ההכנה המלא במסד הנתונים של Supabase.
-                  </p>
+              <section className="space-y-4 rounded-lg border border-primary/40 bg-primary/10 p-4">
+                <header className="flex flex-col gap-2 text-right sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-semibold text-primary">שלב 0 — הכנת מסד הנתונים</h2>
+                    <p className="text-sm text-muted-foreground">
+                      לפני שננסה להתחבר למסד הנתונים, עקבו אחר ההנחיות הידניות הבאות. האשף יאפשר המשך רק לאחר שתסמנו שהמשימות הושלמו.
+                    </p>
+                  </div>
+                  <StepStatusBadge state={preparationState} />
                 </header>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <Button type="button" variant="secondary" onClick={handleCopyScript}>
-                    העתקת הסקריפט
-                  </Button>
-                <Button
-                  type="button"
-                    onClick={() => setRefreshToken((value) => value + 1)}
-                    disabled={isValidationLoading}
-                  >
-                    סיימתי את ההכנה — רעננו את הנתונים
-                  </Button>
-                </div>
+                {preparationState.message && (
+                  <p className="text-sm text-muted-foreground">{preparationState.message}</p>
+                )}
+                {preparationState.error && <TechnicalDetails details={preparationState.error} />}
+                <ol className="space-y-3 rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 p-3 text-right text-sm">
+                  <li className="flex flex-col gap-2">
+                    <label className="flex items-start gap-3 text-right">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
+                        checked={preparationChecklist.schemaExposed}
+                        onChange={(event) =>
+                          updatePreparationChecklist('schemaExposed', event.currentTarget.checked)
+                        }
+                      />
+                      <span className="flex flex-1 flex-col items-end gap-1">
+                        <span className="text-sm font-semibold text-foreground">פעולה 1: חשיפת הסכימה tuttiud</span>
+                        <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+                          <span className="text-lg" aria-hidden="true">
+                            🗂️
+                          </span>
+                          היכנסו ל-Supabase Settings → API והוסיפו את tuttiud לרשימת Exposed schemas (הקישור ייפתח בחלון חדש – בחרו בפרויקט הרלוונטי במידת הצורך).
+                        </span>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <Button asChild size="sm" variant="outline">
+                            <a
+                              href="https://app.supabase.com/project/_/settings/api"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              פתיחת הגדרות API
+                            </a>
+                          </Button>
+                        </div>
+                      </span>
+                    </label>
+                  </li>
+                  <li className="flex flex-col gap-2">
+                    <label className="flex items-start gap-3 text-right">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
+                        checked={preparationChecklist.scriptExecuted}
+                        onChange={(event) =>
+                          updatePreparationChecklist('scriptExecuted', event.currentTarget.checked)
+                        }
+                      />
+                      <span className="flex flex-1 flex-col items-end gap-1">
+                        <span className="text-sm font-semibold text-foreground">פעולה 2: הרצת סקריפט ההתקנה</span>
+                        <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+                          <span className="text-lg" aria-hidden="true">
+                            💾
+                          </span>
+                          העתיקו את הסקריפט המלא, הדביקו אותו ב-SQL Editor של Supabase והריצו אותו מתחילתו ועד סופו.
+                        </span>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <Button type="button" size="sm" variant="secondary" onClick={handleCopyScript}>
+                            העתקת הסקריפט
+                          </Button>
+                        </div>
+                      </span>
+                    </label>
+                  </li>
+                  <li className="flex flex-col gap-2">
+                    <label className="flex items-start gap-3 text-right">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
+                        checked={preparationChecklist.keyCaptured}
+                        onChange={(event) =>
+                          updatePreparationChecklist('keyCaptured', event.currentTarget.checked)
+                        }
+                      />
+                      <span className="flex flex-1 flex-col items-end gap-1">
+                        <span className="text-sm font-semibold text-foreground">פעולה 3: שמירת APP_DEDICATED_KEY</span>
+                        <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+                          <span className="text-lg" aria-hidden="true">
+                            🔑
+                          </span>
+                          לאחר הרצת הסקריפט העתיקו את ערך APP_DEDICATED_KEY שיופיע בתוצאה ושמרו אותו זמנית להדבקה בשלב הבא.
+                        </span>
+                      </span>
+                    </label>
+                  </li>
+                </ol>
                 {copyStatus === 'success' && (
                   <p className="text-xs text-emerald-700">
                     הסקריפט הועתק ללוח. הדביקו אותו ב-SQL Editor של Supabase והפעילו אותו במלואו.
@@ -861,11 +1075,11 @@ export const SetupWizardPage = () => {
                     לא הצלחנו להעתיק אוטומטית את הסקריפט. העתיקו ידנית את הטקסט המלא שמופיע למטה.
                   </p>
                 )}
-                <ol className="list-decimal space-y-1 rounded-md border border-dashed border-muted-foreground/40 bg-muted/40 p-3 text-right text-sm">
-                  <li>ב-Supabase Settings → API הוסיפו את tuttiud לרשימת Exposed schemas.</li>
-                  <li>פתחו את SQL Editor, הדביקו את הסקריפט המלא והריצו אותו.</li>
-                  <li>בסיום העתקו את הערך APP_DEDICATED_KEY שיוצג והמשיכו לשלב הזנת המפתח.</li>
-                </ol>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Button type="button" onClick={handlePreparationContinue} disabled={!isPreparationChecklistComplete}>
+                    סיימתי את ההכנה — המשך לשלב 1
+                  </Button>
+                </div>
                 <pre className="overflow-x-auto whitespace-pre rounded-md border border-muted-foreground/30 bg-background p-3 text-left text-xs ltr" dir="ltr">
                   <code>{DATABASE_PREPARATION_SQL}</code>
                 </pre>
@@ -876,7 +1090,7 @@ export const SetupWizardPage = () => {
               <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
                 <header className="flex items-center justify-between">
                   <div className="text-right">
-                    <h2 className="text-lg font-semibold">שלב 2 — הזנת מפתח היישום</h2>
+                  <h2 className="text-lg font-semibold">שלב 1 — הזנת מפתח היישום</h2>
                     <p className="text-sm text-muted-foreground">
                       הדביקו את APP_DEDICATED_KEY שהתקבל מהסקריפט ושמרו אותו כדי שנוכל להמשיך לאימות החיבור.
                     </p>
@@ -915,7 +1129,7 @@ export const SetupWizardPage = () => {
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 3 — בדיקת החיבור למסד הנתונים</h2>
+                  <h2 className="text-lg font-semibold">שלב 2 — בדיקת החיבור למסד הנתונים</h2>
                   <p className="text-sm text-muted-foreground">
                     לאחר שמירת המפתח נריץ בדיקה יזומה כדי לוודא שניתן להתחבר למסד הנתונים של TutTiud.
                   </p>
@@ -1001,7 +1215,7 @@ export const SetupWizardPage = () => {
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 4 — יצירת מבנה הנתונים</h2>
+                  <h2 className="text-lg font-semibold">שלב 3 — יצירת מבנה הנתונים</h2>
                   <p className="text-sm text-muted-foreground">
                     בודקים שהטבלאות והפונקציות של TutTiud קיימות. אם חסר מבנה נתונים ניתן להפעיל את תהליך ההקמה האוטומטי.
                   </p>
@@ -1030,7 +1244,7 @@ export const SetupWizardPage = () => {
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 5 — בדיקות אחרונות</h2>
+                  <h2 className="text-lg font-semibold">שלב 4 — בדיקות אחרונות</h2>
                   <p className="text-sm text-muted-foreground">
                     מריצים בדיקות כדי לוודא שהכל מוכן לעבודה ושאין הרשאות חסרות.
                   </p>

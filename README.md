@@ -67,10 +67,10 @@ src/
 ## אשף ההקמה (Setup Wizard)
 
 - בעמוד `Setup Wizard` נטענות הגדרות הארגון מטבלת `org_settings`, כולל סטטוס החיבור (`metadata.connections.tuttiud`) והמפתח הייעודי (`metadata.credentials.tuttiudAppJwt`), כדי להבין אם נדרשת הכנה ידנית.
-- ארגון שלא סומן כ־`"connected"` מקבל מסלול מודרך: שלב 1 מסביר כיצד לחשוף את סכימת tuttiud דרך Settings → API, מציג את סקריפט ההכנה הרשמי (גרסה 2.1) עם כפתור העתקה ומפרט את השלבים להרצה ב-Supabase.
-- שלב 2 אוסף את הערך `APP_DEDICATED_KEY` שנוצר בסוף הסקריפט, שולח אותו לפונקציית Azure מאובטחת (`/api/store-tuttiud-app-key`) שמצפינה את הערך, שומרת אותו בעמודת `organizations.dedicated_key_encrypted`, מעדכנת את `org_settings.metadata` עם סימון מאומת ומריצה בדיקת דיאגנוסטיקה ראשונית.
-- שלב 3 נשלט בידי המשתמש: רק לאחר לחיצה על "בדיקת החיבור" מתבצעת קריאה ל-`tuttiud.setup_assistant_initialize`. אם המערכת כבר מסומנת כ־`"connected"`, האשף מדלג על ההתחול וממשיך הלאה.
-- שלב 4 ו־שלב 5 נשארו אוטומטיים: אימות מבנה (`setup_assistant_schema_status`) עם אפשרות להריץ `setup_assistant_run_bootstrap`, ולבסוף דיאגנוסטיקה (`setup_assistant_diagnostics`) עם הנחיות ידידותיות.
+- ארגון שלא סומן כ־`"connected"` מקבל מסלול מודרך שמתחיל ב**שלב 0**: צ'ק-ליסט מונחה לחשיפת הסכימה tuttiud, להרצת סקריפט ההכנה הרשמי (גרסה 2.1) ולהעתקת ערך `APP_DEDICATED_KEY`. לחצן "סיימתי את ההכנה" נפתח רק לאחר שכל תיבה סומנה, כדי לוודא שהמשתמש עבר על כל ההוראות.
+- **שלב 1** אוסף את ערך `APP_DEDICATED_KEY` שנוצר בסוף הסקריפט ושולח אותו לפונקציית Azure המאובטחת (`/api/store-tuttiud-app-key`) שמצפינה את המפתח, שומרת אותו בעמודת `organizations.dedicated_key_encrypted`, ומעדכנת את `org_settings.metadata` ללא חשיפת המפתח ל-Front-End.
+- **שלב 2** נשלט בידי המשתמש: רק לאחר לחיצה על "בדיקת החיבור" מתבצעת קריאה ל-`tuttiud.setup_assistant_initialize`. אם המערכת כבר מסומנת כ־`"connected"`, האשף מדלג על ההתחול וממשיך לשלב הבא.
+- **שלב 3** ו-**שלב 4** נשארו אוטומטיים: אימות מבנה (`setup_assistant_schema_status`) עם אפשרות להריץ `setup_assistant_run_bootstrap`, ולבסוף דיאגנוסטיקה (`setup_assistant_diagnostics`) עם הנחיות ידידותיות.
 - מסך בחירת הארגון מפנה לאשף כאשר הסטטוס אינו `"connected"`, והאשף מעדכן את המטא־דאטה באמצעות `updateTuttiudConnectionStatus` לאחר שכל השלבים עוברים בהצלחה.
 
 ## שכבת BFF מאובטחת (Azure Functions)
