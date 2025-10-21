@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -19,6 +19,7 @@ import {
   type SetupStatus,
   type SetupDiagnostics,
   type SetupWizardError,
+  type TuttiudConnectionStatus,
   saveTuttiudAppKey,
   verifyStoredTuttiudSetup,
   updateTuttiudConnectionStatus
@@ -286,6 +287,11 @@ export const SetupWizardPage = () => {
   const [appKeyInput, setAppKeyInput] = useState('')
   const [appKeyState, setAppKeyState] = useState<StepState>({ status: 'idle' })
   const [validationTrigger, setValidationTrigger] = useState<'auto' | 'manual' | null>(null)
+  const previousContextRef = useRef<{
+    orgId: string | null
+    hasDedicatedKey: boolean
+    tuttiudStatus: TuttiudConnectionStatus
+  }>({ orgId: null, hasDedicatedKey: false, tuttiudStatus: null })
 
   const readyToStart = useMemo(
     () => clientAvailable && organizationStatus === 'ready' && Boolean(selectedOrganization),
@@ -299,19 +305,26 @@ export const SetupWizardPage = () => {
     queryKey: ['setup-wizard', 'setup-status', organizationId, accessToken, refreshToken],
     queryFn: () => fetchSetupStatus(organizationId!, { accessToken }),
     enabled: readyToStart && Boolean(organizationId) && Boolean(accessToken),
-    refetchOnWindowFocus: false
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
   })
 
   const settingsQuery = useQuery<OrganizationSetupSettings | null, SetupWizardError>({
     queryKey: ['setup-wizard', 'organization-settings', organizationId, refreshToken],
     queryFn: () => fetchOrganizationSetupSettings(organizationId!),
     enabled: readyToStart && Boolean(organizationId),
-    refetchOnWindowFocus: false
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
   })
 
   useEffect(() => {
     if (!selectedOrganization) {
       setOrganizationSettings(null)
+      previousContextRef.current = {
+        orgId: null,
+        hasDedicatedKey: false,
+        tuttiudStatus: null
+      }
     }
   }, [selectedOrganization])
 
@@ -484,7 +497,19 @@ export const SetupWizardPage = () => {
 
     const hasDedicatedKey = setupStatusQuery.data?.hasDedicatedKey ?? false
     const storedKey = settings.metadata.credentials.tuttiudAppJwt ?? ''
-    const isAlreadyConnected = settings.metadata.connections.tuttiud === 'connected'
+    const tuttiudStatus = settings.metadata.connections.tuttiud ?? null
+    const isAlreadyConnected = tuttiudStatus === 'connected'
+
+    const currentContext = {
+      orgId: selectedOrganization?.org_id ?? null,
+      hasDedicatedKey,
+      tuttiudStatus
+    }
+    const contextChanged =
+      previousContextRef.current.orgId !== currentContext.orgId ||
+      previousContextRef.current.hasDedicatedKey !== currentContext.hasDedicatedKey ||
+      previousContextRef.current.tuttiudStatus !== currentContext.tuttiudStatus
+    previousContextRef.current = currentContext
 
     if (hasDedicatedKey) {
       setAppKeyInput('')
@@ -550,18 +575,20 @@ export const SetupWizardPage = () => {
       })
       setValidationTrigger((current) => current ?? 'auto')
     } else {
-      requireManualPreparation({
-        status: 'idle',
-        message:
-          'לפני שנבדוק את החיבור, עקבו אחר ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
-        error: undefined
-      })
-      setInitState({
-        status: 'idle',
-        message:
-          'לפני שנבדוק את החיבור, עקבו אחר ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
-        error: undefined
-      })
+      if (!needsPreparation || contextChanged) {
+        requireManualPreparation({
+          status: 'idle',
+          message:
+            'לפני שנבדוק את החיבור, עקבו אחר ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
+          error: undefined
+        })
+        setInitState({
+          status: 'idle',
+          message:
+            'לפני שנבדוק את החיבור, עקבו אחר ההנחיות בשלב 0 והזינו את מפתח היישום בשלב 1.',
+          error: undefined
+        })
+      }
     }
   }, [
     markPreparationSatisfied,
