@@ -1,10 +1,15 @@
 /* eslint-env node */
 const { loadTenantContext } = require('../_shared/tenant-context')
-const { sendJson } = require('../_shared/utils')
+const { sendJson, logEnvironmentStatuses } = require('../_shared/utils')
 
 const normaliseString = (value) => (typeof value === 'string' ? value.trim() : '')
 
 module.exports = async function (context, req) {
+  console.log('[session-records] Function triggered', {
+    method: req.method,
+    orgId: typeof req.body?.orgId === 'string' ? req.body.orgId : req.body?.orgId ?? null
+  })
+
   if (req.method !== 'POST') {
     sendJson(context, 405, {
       success: false,
@@ -12,6 +17,12 @@ module.exports = async function (context, req) {
     })
     return
   }
+
+  logEnvironmentStatuses('session-records', [
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'APP_ORG_CREDENTIALS_ENCRYPTION_KEY'
+  ])
 
   const orgId = normaliseString(req.body?.orgId)
   const studentId = normaliseString(req.body?.studentId)
@@ -30,8 +41,11 @@ module.exports = async function (context, req) {
 
   let tenantContext
   try {
+    console.log('[session-records] Loading tenant context')
     tenantContext = await loadTenantContext(req, { orgId, requireRole: 'member' })
   } catch (error) {
+    console.error('Caught error:', error)
+    console.error('[session-records] Tenant context error', error)
     if (error?.status) {
       sendJson(context, error.status, {
         success: false,
@@ -40,7 +54,6 @@ module.exports = async function (context, req) {
       return
     }
 
-    context.log('session-records: unexpected tenant context error', error)
     sendJson(context, 500, {
       success: false,
       message: 'לא ניתן היה לאמת את ההרשאות לפעולה זו. נסו שוב או פנו לתמיכה.'
@@ -50,6 +63,7 @@ module.exports = async function (context, req) {
 
   const { tenantClient, user } = tenantContext
 
+  console.log('[session-records] Verifying student ownership', { studentId, instructorId: user.id })
   const { data: student, error: studentError } = await tenantClient
     .schema('tuttiud')
     .from('Students')
@@ -58,7 +72,7 @@ module.exports = async function (context, req) {
     .maybeSingle()
 
   if (studentError) {
-    context.log('session-records: failed to load student', studentError)
+    console.error('[session-records] Failed to load student', studentError)
     sendJson(context, 500, {
       success: false,
       message: 'טעינת פרטי התלמיד נכשלה. נסו שוב מאוחר יותר.'
@@ -82,6 +96,7 @@ module.exports = async function (context, req) {
     return
   }
 
+  console.log('[session-records] Inserting session record')
   const { data: inserted, error: insertError } = await tenantClient
     .schema('tuttiud')
     .from('SessionRecords')
@@ -96,7 +111,7 @@ module.exports = async function (context, req) {
     .maybeSingle()
 
   if (insertError) {
-    context.log('session-records: insert failed', insertError)
+    console.error('[session-records] Insert failed', insertError)
     sendJson(context, 500, {
       success: false,
       message: 'שמירת התיעוד נכשלה. נסו שוב מאוחר יותר.'
@@ -104,6 +119,9 @@ module.exports = async function (context, req) {
     return
   }
 
+  console.log('[session-records] Session record created successfully', {
+    recordId: inserted?.id ?? null
+  })
   sendJson(context, 200, {
     success: true,
     record: inserted

@@ -276,11 +276,6 @@ export const SetupWizardPage = () => {
   })
   const [needsPreparation, setNeedsPreparation] = useState(false)
   const [preparationState, setPreparationState] = useState<StepState>({ status: 'idle' })
-  const [preparationChecklist, setPreparationChecklist] = useState({
-    schemaExposed: false,
-    scriptExecuted: false,
-    keyCaptured: false
-  })
   const [preparationAcknowledged, setPreparationAcknowledged] = useState(false)
   const [preparationDetails, setPreparationDetails] = useState<string | null>(null)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
@@ -345,11 +340,6 @@ export const SetupWizardPage = () => {
     Boolean(selectedOrganization && organizationSettings) &&
     (hasDedicatedKeyStored || !shouldShowPreparationGuide || preparationAcknowledged) &&
     (hasDedicatedKeyStored || tuttiudStatus === 'connected' || hasStoredAppKey)
-  const requiresFullPreparation = !hasDedicatedKeyStored
-  const isPreparationChecklistComplete =
-    (requiresFullPreparation ? preparationChecklist.schemaExposed : true) &&
-    preparationChecklist.scriptExecuted &&
-    (requiresFullPreparation ? preparationChecklist.keyCaptured : true)
   const isSettingsLoaded = Boolean(organizationSettings)
   const isConnectionUpdateLoading = connectionUpdateState.status === 'loading'
 
@@ -361,51 +351,10 @@ export const SetupWizardPage = () => {
     : 'לאחר שמירת המפתח נריץ בדיקה יזומה כדי לוודא שניתן להתחבר למסד הנתונים של TutTiud.'
   const validationButtonLabel = showReturningVerification ? 'אימות ההגדרה' : 'בדיקת החיבור'
 
-  const resetPreparationChecklist = useCallback(() => {
-    setPreparationChecklist({
-      schemaExposed: false,
-      scriptExecuted: false,
-      keyCaptured: false
-    })
-    setPreparationAcknowledged(false)
-  }, [])
-
-  const updatePreparationChecklist = useCallback(
-    (key: keyof typeof preparationChecklist, checked: boolean) => {
-      setPreparationChecklist((current) => {
-        const next = {
-          ...current,
-          [key]: checked
-        }
-
-        const checklistComplete =
-          (requiresFullPreparation ? next.schemaExposed : true) &&
-          next.scriptExecuted &&
-          (requiresFullPreparation ? next.keyCaptured : true)
-
-        if (!checklistComplete) {
-          setPreparationAcknowledged(false)
-          setPreparationState((previous) =>
-            previous.status === 'success'
-              ? {
-                  status: 'idle',
-                  message: 'השלימו את הצעדים הידניים כדי להמשיך לשלב 1.',
-                  error: undefined
-                }
-              : previous
-          )
-        }
-
-        return next
-      })
-    },
-    [requiresFullPreparation]
-  )
-
   const requireManualPreparation = useCallback(
     (state?: StepState) => {
       setNeedsPreparation(true)
-      resetPreparationChecklist()
+      setPreparationAcknowledged(false)
       setPreparationState(
         state ?? {
           status: 'idle',
@@ -414,7 +363,7 @@ export const SetupWizardPage = () => {
         }
       )
     },
-    [resetPreparationChecklist]
+    []
   )
 
   const markPreparationSatisfied = useCallback(
@@ -1012,17 +961,13 @@ export const SetupWizardPage = () => {
   }, [])
 
   const handlePreparationContinue = useCallback(() => {
-    if (!isPreparationChecklistComplete) {
-      return
-    }
-
     setPreparationAcknowledged(true)
     setPreparationState({
       status: 'success',
-      message: 'סימנתם שהשלמתם את שלב ההכנה. עברו לשלב 1 להזנת המפתח.',
+      message: 'סיימתם את שלב ההכנה. עברו לשלב 1 להזנת המפתח.',
       error: undefined
     })
-  }, [isPreparationChecklistComplete])
+  }, [])
 
   const handleSaveAppKey = useCallback(async () => {
     if (!selectedOrganization) {
@@ -1109,7 +1054,7 @@ export const SetupWizardPage = () => {
     if (shouldShowPreparationGuide && !preparationAcknowledged) {
       setPreparationState({
         status: 'error',
-        message: 'סמנו שסיימתם את הצעדים הידניים לפני בדיקת החיבור.',
+        message: 'אשרו שסיימתם את שלב ההכנה לפני בדיקת החיבור.',
         error: undefined
       })
       return
@@ -1164,7 +1109,7 @@ export const SetupWizardPage = () => {
                   <div className="space-y-1">
                     <h2 className="text-lg font-semibold text-primary">שלב 0 — הכנת מסד הנתונים</h2>
                     <p className="text-sm text-muted-foreground">
-                      לפני שננסה להתחבר למסד הנתונים, עקבו אחר ההנחיות הידניות הבאות. האשף יאפשר המשך רק לאחר שתסמנו שהמשימות הושלמו.
+                      לפני שננסה להתחבר למסד הנתונים, עקבו אחר ההנחיות הידניות הבאות. לאחר שהשלמתם את הצעדים, לחצו על "סיימתי את ההכנה" כדי להמשיך.
                     </p>
                   </div>
                   <StepStatusBadge state={preparationState} />
@@ -1175,86 +1120,52 @@ export const SetupWizardPage = () => {
                 {preparationState.error && <TechnicalDetails details={preparationState.error} />}
                 <ol className="space-y-3 rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 p-3 text-right text-sm">
                   {(!hasDedicatedKeyStored || !needsPreparation) && (
-                    <li className="flex flex-col gap-2">
-                      <label className="flex items-start gap-3 text-right">
-                        <input
-                          type="checkbox"
-                          className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
-                          checked={preparationChecklist.schemaExposed}
-                          onChange={(event) =>
-                            updatePreparationChecklist('schemaExposed', event.currentTarget.checked)
-                          }
-                        />
-                        <span className="flex flex-1 flex-col items-end gap-1">
+                    <li className="space-y-2 text-right">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-1 flex-col items-end gap-1">
                           <span className="text-sm font-semibold text-foreground">פעולה 1: חשיפת הסכימה tuttiud</span>
                           <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
-                            <span className="text-lg" aria-hidden="true">
-                              🗂️
-                            </span>
+                            <span className="text-lg" aria-hidden="true">🗂️</span>
                             היכנסו ל-Supabase Settings → API והוסיפו את tuttiud לרשימת Exposed schemas (הקישור ייפתח בחלון חדש – בחרו בפרויקט הרלוונטי במידת הצורך).
                           </span>
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            <Button asChild size="sm" variant="outline">
-                              <a
-                                href="https://app.supabase.com/project/_/settings/api"
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                פתיחת הגדרות API
-                              </a>
-                            </Button>
-                          </div>
-                        </span>
-                      </label>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <Button asChild size="sm" variant="outline">
+                          <a href="https://app.supabase.com/project/_/settings/api" target="_blank" rel="noreferrer">
+                            פתיחת הגדרות API
+                          </a>
+                        </Button>
+                      </div>
                     </li>
                   )}
-                  <li className="flex flex-col gap-2">
-                    <label className="flex items-start gap-3 text-right">
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
-                        checked={preparationChecklist.scriptExecuted}
-                        onChange={(event) =>
-                          updatePreparationChecklist('scriptExecuted', event.currentTarget.checked)
-                        }
-                      />
-                      <span className="flex flex-1 flex-col items-end gap-1">
+                  <li className="space-y-2 text-right">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex flex-1 flex-col items-end gap-1">
                         <span className="text-sm font-semibold text-foreground">פעולה 2: הרצת סקריפט ההתקנה</span>
                         <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
-                          <span className="text-lg" aria-hidden="true">
-                            💾
-                          </span>
+                          <span className="text-lg" aria-hidden="true">💾</span>
                           העתיקו את הסקריפט המלא, הדביקו אותו ב-SQL Editor של Supabase והריצו אותו מתחילתו ועד סופו.
                         </span>
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <Button type="button" size="sm" variant="secondary" onClick={handleCopyScript}>
-                            העתקת הסקריפט
-                          </Button>
-                        </div>
-                      </span>
-                    </label>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <Button type="button" size="sm" variant="secondary" onClick={handleCopyScript}>
+                        העתקת הסקריפט
+                      </Button>
+                    </div>
                   </li>
                   {(!hasDedicatedKeyStored || !needsPreparation) && (
-                    <li className="flex flex-col gap-2">
-                      <label className="flex items-start gap-3 text-right">
-                        <input
-                          type="checkbox"
-                          className="mt-1 h-4 w-4 rounded border-muted-foreground/40 text-primary focus:ring-primary"
-                          checked={preparationChecklist.keyCaptured}
-                          onChange={(event) =>
-                            updatePreparationChecklist('keyCaptured', event.currentTarget.checked)
-                          }
-                        />
-                        <span className="flex flex-1 flex-col items-end gap-1">
+                    <li className="space-y-2 text-right">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-1 flex-col items-end gap-1">
                           <span className="text-sm font-semibold text-foreground">פעולה 3: שמירת APP_DEDICATED_KEY</span>
                           <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
-                            <span className="text-lg" aria-hidden="true">
-                              🔑
-                            </span>
+                            <span className="text-lg" aria-hidden="true">🔑</span>
                             לאחר הרצת הסקריפט העתיקו את ערך APP_DEDICATED_KEY שיופיע בתוצאה ושמרו אותו זמנית להדבקה בשלב הבא.
                           </span>
-                        </span>
-                      </label>
+                        </div>
+                      </div>
                     </li>
                   )}
                 </ol>
@@ -1269,7 +1180,7 @@ export const SetupWizardPage = () => {
                   </p>
                 )}
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  <Button type="button" onClick={handlePreparationContinue} disabled={!isPreparationChecklistComplete}>
+                  <Button type="button" onClick={handlePreparationContinue}>
                     סיימתי את ההכנה — המשך לשלב 1
                   </Button>
                 </div>

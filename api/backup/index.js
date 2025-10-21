@@ -1,8 +1,13 @@
 /* eslint-env node */
 const { loadTenantContext } = require('../_shared/tenant-context')
-const { sendJson } = require('../_shared/utils')
+const { sendJson, logEnvironmentStatuses } = require('../_shared/utils')
 
 module.exports = async function (context, req) {
+  console.log('[backup] Function triggered', {
+    method: req.method,
+    orgId: typeof req.query?.orgId === 'string' ? req.query.orgId : req.query?.orgId ?? null
+  })
+
   if (req.method !== 'GET') {
     sendJson(context, 405, {
       success: false,
@@ -11,12 +16,23 @@ module.exports = async function (context, req) {
     return
   }
 
+  logEnvironmentStatuses('backup', [
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'APP_ORG_CREDENTIALS_ENCRYPTION_KEY'
+  ])
+
   const orgId = typeof req.query?.orgId === 'string' ? req.query.orgId.trim() : ''
+
+  console.log('[backup] Normalised orgId', orgId)
 
   let tenantContext
   try {
+    console.log('[backup] Loading tenant context')
     tenantContext = await loadTenantContext(req, { orgId, requireRole: 'admin' })
   } catch (error) {
+    console.error('Caught error:', error)
+    console.error('[backup] Tenant context error', error)
     if (error?.status) {
       sendJson(context, error.status, {
         success: false,
@@ -25,7 +41,6 @@ module.exports = async function (context, req) {
       return
     }
 
-    context.log('backup: unexpected tenant context error', error)
     sendJson(context, 500, {
       success: false,
       message: 'לא ניתן היה לאמת את ההרשאות לביצוע הגיבוי. נסו שוב מאוחר יותר.'
@@ -35,6 +50,7 @@ module.exports = async function (context, req) {
 
   const { tenantClient } = tenantContext
 
+  console.log('[backup] Fetching data for backup payload')
   const [studentsResult, instructorsResult, sessionsResult] = await Promise.all([
     tenantClient
       .schema('tuttiud')
@@ -51,7 +67,7 @@ module.exports = async function (context, req) {
   ])
 
   if (studentsResult.error || instructorsResult.error || sessionsResult.error) {
-    context.log('backup: failed to collect data', {
+    console.error('[backup] Failed to collect backup data', {
       studentsError: studentsResult.error,
       instructorsError: instructorsResult.error,
       sessionsError: sessionsResult.error
@@ -63,6 +79,11 @@ module.exports = async function (context, req) {
     return
   }
 
+  console.log('[backup] Backup payload prepared successfully', {
+    students: studentsResult.data?.length ?? 0,
+    instructors: instructorsResult.data?.length ?? 0,
+    sessionRecords: sessionsResult.data?.length ?? 0
+  })
   sendJson(context, 200, {
     success: true,
     backup: {

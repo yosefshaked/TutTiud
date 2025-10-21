@@ -3,7 +3,7 @@ const { createClient } = require('@supabase/supabase-js')
 
 const { encryptValue } = require('../_shared/encryption')
 const { loadControlContext } = require('../_shared/tenant-context')
-const { isRecord, sendJson } = require('../_shared/utils')
+const { isRecord, sendJson, logEnvironmentStatuses } = require('../_shared/utils')
 
 const buildStoredMetadata = (currentMetadata) => {
   const base = isRecord(currentMetadata) ? { ...currentMetadata } : {}
@@ -21,6 +21,11 @@ const buildStoredMetadata = (currentMetadata) => {
 }
 
 module.exports = async function (context, req) {
+  console.log('[store-tuttiud-app-key] Function triggered', {
+    method: req.method,
+    hasBody: Boolean(req.body)
+  })
+
   if (req.method !== 'POST') {
     sendJson(context, 405, {
       success: false,
@@ -29,12 +34,19 @@ module.exports = async function (context, req) {
     return
   }
 
+  logEnvironmentStatuses('store-tuttiud-app-key', [
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'APP_ORG_CREDENTIALS_ENCRYPTION_KEY'
+  ])
+
+  console.log('[store-tuttiud-app-key] Validating infrastructure environment variables')
   const missingInfrastructureVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
     .filter((name) => !process.env[name])
 
   if (missingInfrastructureVars.length > 0) {
-    context.log(
-      'store-tuttiud-app-key: missing infrastructure configuration',
+    console.error(
+      '[store-tuttiud-app-key] Missing infrastructure configuration',
       missingInfrastructureVars
     )
     sendJson(context, 500, {
@@ -47,9 +59,10 @@ module.exports = async function (context, req) {
   const encryptionSecret = process.env.APP_ORG_CREDENTIALS_ENCRYPTION_KEY
 
   if (!encryptionSecret) {
-    context.log('store-tuttiud-app-key: missing encryption configuration', {
-      missing: 'APP_ORG_CREDENTIALS_ENCRYPTION_KEY'
-    })
+    console.error(
+      '[store-tuttiud-app-key] Missing encryption configuration',
+      { missing: 'APP_ORG_CREDENTIALS_ENCRYPTION_KEY' }
+    )
     sendJson(context, 500, {
       success: false,
       message:
@@ -64,6 +77,12 @@ module.exports = async function (context, req) {
     typeof req.body?.supabaseUrl === 'string' ? req.body.supabaseUrl.trim() : ''
   const currentMetadata = req.body?.currentMetadata ?? null
 
+  console.log('[store-tuttiud-app-key] Incoming payload normalised', {
+    orgId,
+    hasAppKey: Boolean(appKey),
+    hasSupabaseUrl: Boolean(tenantSupabaseUrl)
+  })
+
   if (!orgId || !appKey || !tenantSupabaseUrl) {
     sendJson(context, 400, {
       success: false,
@@ -74,8 +93,11 @@ module.exports = async function (context, req) {
 
   let controlContext
   try {
+    console.log('[store-tuttiud-app-key] Loading control context for org', orgId)
     controlContext = await loadControlContext(req, { orgId, requireRole: 'admin' })
   } catch (error) {
+    console.error('Caught error:', error)
+    console.error('[store-tuttiud-app-key] Control context error', error)
     if (error?.status) {
       sendJson(context, error.status, {
         success: false,
@@ -84,7 +106,6 @@ module.exports = async function (context, req) {
       return
     }
 
-    context.log('store-tuttiud-app-key: unexpected authentication error', error)
     sendJson(context, 500, {
       success: false,
       message: 'לא ניתן היה לאמת את ההרשאות לפעולה זו. פנו לתמיכה לקבלת סיוע.'
@@ -96,9 +117,11 @@ module.exports = async function (context, req) {
 
   let encryptedPayload
   try {
+    console.log('[store-tuttiud-app-key] Encrypting TutTiud app key')
     encryptedPayload = encryptValue(appKey, encryptionSecret)
   } catch (error) {
-    context.log('store-tuttiud-app-key: encryption failed', error)
+    console.error('Caught error:', error)
+    console.error('[store-tuttiud-app-key] Encryption failed', error)
     sendJson(context, 500, {
       success: false,
       message: 'הצפנת המפתח נכשלה. פנו לתמיכה לקבלת סיוע.'
@@ -106,6 +129,7 @@ module.exports = async function (context, req) {
     return
   }
 
+  console.log('[store-tuttiud-app-key] Reading existing organization record')
   const { data: existingOrg, error: readOrgError } = await adminClient
     .from('organizations')
     .select('dedicated_key_encrypted')
@@ -113,7 +137,7 @@ module.exports = async function (context, req) {
     .maybeSingle()
 
   if (readOrgError) {
-    context.log('store-tuttiud-app-key: failed reading organization', readOrgError)
+    console.error('[store-tuttiud-app-key] Failed reading organization', readOrgError)
     sendJson(context, 500, {
       success: false,
       message: 'קריאת פרטי הארגון נכשלה. נסו שוב בעוד מספר רגעים או פנו לתמיכה.'
@@ -122,6 +146,7 @@ module.exports = async function (context, req) {
   }
 
   if (!existingOrg) {
+    console.error('[store-tuttiud-app-key] Organization not found', orgId)
     sendJson(context, 404, {
       success: false,
       message: 'הארגון לא נמצא. בדקו שבחרתם את הארגון הנכון ונסו שוב.'
@@ -129,13 +154,14 @@ module.exports = async function (context, req) {
     return
   }
 
+  console.log('[store-tuttiud-app-key] Storing encrypted key for organization')
   const { error: storeKeyError } = await adminClient
     .from('organizations')
     .update({ dedicated_key_encrypted: encryptedPayload })
     .eq('id', orgId)
 
   if (storeKeyError) {
-    context.log('store-tuttiud-app-key: failed storing encrypted key', storeKeyError)
+    console.error('[store-tuttiud-app-key] Failed storing encrypted key', storeKeyError)
     sendJson(context, 500, {
       success: false,
       message: 'שמירת מפתח היישום נכשלה. נסו שוב מאוחר יותר או פנו לתמיכה.'
@@ -146,10 +172,12 @@ module.exports = async function (context, req) {
   let diagnostics
 
   try {
+    console.log('[store-tuttiud-app-key] Creating tenant client for diagnostics')
     const tenantClient = createClient(tenantSupabaseUrl, appKey, {
       auth: { persistSession: false }
     })
 
+    console.log('[store-tuttiud-app-key] Running tuttiud.setup_assistant_diagnostics')
     const { data, error: diagnosticsError } = await tenantClient
       .schema('tuttiud')
       .rpc('setup_assistant_diagnostics')
@@ -160,7 +188,8 @@ module.exports = async function (context, req) {
 
     diagnostics = data ?? null
   } catch (error) {
-    context.log('store-tuttiud-app-key: diagnostics failed', error)
+    console.error('Caught error:', error)
+    console.error('[store-tuttiud-app-key] Diagnostics failed', error)
 
     const { error: revertError } = await adminClient
       .from('organizations')
@@ -168,7 +197,10 @@ module.exports = async function (context, req) {
       .eq('id', orgId)
 
     if (revertError) {
-      context.log('store-tuttiud-app-key: failed reverting encrypted key after diagnostics error', revertError)
+      console.error(
+        '[store-tuttiud-app-key] Failed reverting encrypted key after diagnostics error',
+        revertError
+      )
     }
 
     sendJson(context, 400, {
@@ -182,13 +214,14 @@ module.exports = async function (context, req) {
 
   const nextMetadata = buildStoredMetadata(currentMetadata)
 
+  console.log('[store-tuttiud-app-key] Updating org_settings metadata with stored key flag')
   const { error: metadataError } = await adminClient
     .from('org_settings')
     .update({ metadata: nextMetadata })
     .eq('org_id', orgId)
 
   if (metadataError) {
-    context.log('store-tuttiud-app-key: failed updating metadata', metadataError)
+    console.error('[store-tuttiud-app-key] Failed updating metadata', metadataError)
     sendJson(context, 500, {
       success: false,
       message:
@@ -197,6 +230,7 @@ module.exports = async function (context, req) {
     return
   }
 
+  console.log('[store-tuttiud-app-key] Successfully stored TutTiud app key')
   sendJson(context, 200, {
     success: true,
     metadata: nextMetadata,

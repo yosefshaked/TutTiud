@@ -1,8 +1,13 @@
 /* eslint-env node */
 const { loadControlContext } = require('../_shared/tenant-context')
-const { sendJson } = require('../_shared/utils')
+const { sendJson, logEnvironmentStatuses } = require('../_shared/utils')
 
 module.exports = async function (context, req) {
+  console.log('[setup-status] Function triggered', {
+    method: req.method,
+    orgId: typeof req.query?.orgId === 'string' ? req.query.orgId : req.query?.orgId ?? null
+  })
+
   if (req.method !== 'GET') {
     sendJson(context, 405, {
       success: false,
@@ -11,12 +16,24 @@ module.exports = async function (context, req) {
     return
   }
 
+  logEnvironmentStatuses('setup-status', [
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'APP_ORG_CREDENTIALS_ENCRYPTION_KEY'
+  ])
+
   const orgId = typeof req.query?.orgId === 'string' ? req.query.orgId.trim() : ''
+
+  console.log('[setup-status] Normalised orgId', orgId)
+
+  console.log('[setup-status] Loading control context')
 
   let controlContext
   try {
     controlContext = await loadControlContext(req, { orgId, requireRole: 'admin' })
   } catch (error) {
+    console.error('Caught error:', error)
+    console.error('[setup-status] Control context failed', error)
     if (error?.status) {
       sendJson(context, error.status, {
         success: false,
@@ -25,7 +42,6 @@ module.exports = async function (context, req) {
       return
     }
 
-    context.log('setup-status: unexpected control context error', error)
     sendJson(context, 500, {
       success: false,
       message: 'לא ניתן היה לוודא את סטטוס הארגון. נסו שוב או פנו לתמיכה.'
@@ -35,6 +51,7 @@ module.exports = async function (context, req) {
 
   const { adminClient } = controlContext
 
+  console.log('[setup-status] Querying organization record')
   const { data: organization, error: organizationError } = await adminClient
     .from('organizations')
     .select('dedicated_key_encrypted')
@@ -42,7 +59,7 @@ module.exports = async function (context, req) {
     .maybeSingle()
 
   if (organizationError) {
-    context.log('setup-status: failed reading organization record', organizationError)
+    console.error('[setup-status] Organization query failed', organizationError)
     sendJson(context, 500, {
       success: false,
       message: 'טעינת פרטי הארגון נכשלה. נסו שוב מאוחר יותר או פנו לתמיכה.'
@@ -51,12 +68,17 @@ module.exports = async function (context, req) {
   }
 
   if (!organization) {
+    console.error('[setup-status] Organization not found for orgId', orgId)
     sendJson(context, 404, {
       success: false,
       message: 'הארגון לא נמצא. ודאו שבחרתם את הארגון הנכון ונסו שוב.'
     })
     return
   }
+
+  console.log('[setup-status] Returning organization status', {
+    hasDedicatedKey: Boolean(organization.dedicated_key_encrypted)
+  })
 
   sendJson(context, 200, {
     success: true,
