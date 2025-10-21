@@ -51,6 +51,7 @@ export type SetupDiagnostics = {
 export type SetupWizardError = {
   message: string
   cause?: unknown
+  kind?: 'missing-function' | 'unauthorized' | 'unknown'
 }
 
 const errorForMissingClient: SetupWizardError = {
@@ -71,7 +72,7 @@ const isPostgrestMissingFunction = (error: unknown) =>
     error &&
       typeof error === 'object' &&
       'code' in error &&
-      (error as { code?: string | number }).code === 'PGRST116'
+      ['PGRST116', 'PGRST202'].includes(String((error as { code?: string | number }).code))
   )
 
 const mapDiagnosticsIssues = (rawIssues: unknown, type: DiagnosticsIssue['type']) => {
@@ -271,7 +272,8 @@ export const initializeSetupForOrganization = async (
         throw {
           message:
             'תהליך ההתחלה של TutTiud לא הותקן בסכימת tuttiud של Supabase. אנא פרסו את ההרחבות הנדרשות ונסו שוב.',
-          cause: error
+          cause: error,
+          kind: 'missing-function'
         } satisfies SetupWizardError
       }
 

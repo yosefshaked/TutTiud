@@ -33,6 +33,34 @@ const issueTypeLabel: Record<string, string> = {
   other: 'פריטים נוספים'
 }
 
+const DATABASE_PREPARATION_SQL = `-- Tuttiud Platform Setup Script V1.0
+
+-- 1. Create the application-specific schema
+CREATE SCHEMA IF NOT EXISTS tuttiud;
+
+-- 2. Create the setup assistant function
+-- This function performs initial bootstrapping inside your database.
+CREATE OR REPLACE FUNCTION tuttiud.setup_assistant_initialize(org_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+-- SECURITY DEFINER is required to allow the function to perform
+-- administrative tasks like creating tables on behalf of the application.
+SECURITY DEFINER AS $$
+BEGIN
+  -- Bootstrapping logic, e.g., creating initial tables.
+  CREATE TABLE IF NOT EXISTS tuttiud.projects (
+    id bigserial PRIMARY KEY,
+    name text NOT NULL,
+    organization_id uuid DEFAULT org_id,
+    created_at timestamptz DEFAULT now()
+  );
+
+  -- Add any other platform-required tables or settings here in the future.
+
+  RAISE NOTICE 'Tuttiud setup for org_id % completed successfully.', org_id;
+END;
+$$;`
+
 const formatTechnicalDetails = (cause: unknown): string | null => {
   if (!cause) return null
   if (cause instanceof Error) {
@@ -136,6 +164,9 @@ export const SetupWizardPage = () => {
   const [connectionUpdateState, setConnectionUpdateState] = useState<StepState>({
     status: 'idle'
   })
+  const [needsPreparation, setNeedsPreparation] = useState(false)
+  const [preparationDetails, setPreparationDetails] = useState<string | null>(null)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
 
   const readyToStart = useMemo(
     () => clientAvailable && organizationStatus === 'ready' && Boolean(selectedOrganization),
@@ -148,6 +179,9 @@ export const SetupWizardPage = () => {
     const orgId = selectedOrganization.org_id
 
     const runChecks = async () => {
+      setNeedsPreparation(false)
+      setPreparationDetails(null)
+      setCopyStatus('idle')
       setInitState({ status: 'loading' })
       setOrganizationSettings(null)
       setSchemaState({ status: 'idle', exists: null, lastBootstrappedAt: null })
@@ -186,6 +220,17 @@ export const SetupWizardPage = () => {
         }
       } catch (error) {
         const setupError = error as SetupWizardError
+        if (setupError.kind === 'missing-function') {
+          setNeedsPreparation(true)
+          setPreparationDetails(formatTechnicalDetails(setupError.cause))
+          setInitState({
+            status: 'warning',
+            message:
+              'נדרש להפעיל סקריפט הכנה חד-פעמי במסד הנתונים של Supabase לפני שנוכל להמשיך בתהליך ההקמה.',
+            error: undefined
+          })
+          return
+        }
         setInitState({
           status: 'error',
           message: setupError.message,
@@ -302,7 +347,8 @@ export const SetupWizardPage = () => {
     if (
       !selectedOrganization ||
       !organizationSettings ||
-      organizationSettings.metadata.connections.tuttiud === 'connected'
+      organizationSettings.metadata.connections.tuttiud === 'connected' ||
+      needsPreparation
     ) {
       return
     }
@@ -324,6 +370,7 @@ export const SetupWizardPage = () => {
     diagnosticsState.status,
     initState.status,
     organizationSettings,
+    needsPreparation,
     runConnectionUpdate,
     schemaState.exists,
     schemaState.status,
@@ -365,6 +412,21 @@ export const SetupWizardPage = () => {
   const diagnosticsIssues = diagnosticsState.diagnostics?.issues ?? []
   const diagnosticsSql = diagnosticsState.diagnostics?.sqlSnippets ?? []
   const isConnectionUpdateLoading = connectionUpdateState.status === 'loading'
+  const isInitialLoading = initState.status === 'loading'
+
+  const handleCopyScript = useCallback(async () => {
+    try {
+      if (!navigator?.clipboard?.writeText) {
+        setCopyStatus('error')
+        return
+      }
+      await navigator.clipboard.writeText(DATABASE_PREPARATION_SQL)
+      setCopyStatus('success')
+    } catch (error) {
+      console.error('copy setup script failed', error)
+      setCopyStatus('error')
+    }
+  }, [])
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col gap-6 bg-muted/30 px-4 py-8">
@@ -384,6 +446,48 @@ export const SetupWizardPage = () => {
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
+            {needsPreparation && (
+              <section className="space-y-3 rounded-lg border border-primary/40 bg-primary/10 p-4">
+                <header className="flex flex-col gap-1 text-right">
+                  <h2 className="text-lg font-semibold text-primary">
+                    שלב 0 — הכנת מסד הנתונים ל-TutTiud
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    כדי להתחבר ל-TutTiud, יש להריץ סקריפט הכנה חד-פעמי במסד הנתונים של Supabase. הסקריפט יוצר את סכימת tuttiud
+                    והפונקציות הדרושות.
+                  </p>
+                </header>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Button type="button" variant="secondary" onClick={handleCopyScript}>
+                    העתקת הסקריפט
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => setRefreshToken((value) => value + 1)}
+                    disabled={isInitialLoading}
+                  >
+                    הרצתי את הסקריפט — נסו שוב
+                  </Button>
+                </div>
+                {copyStatus === 'success' && (
+                  <p className="text-xs text-emerald-700">הסקריפט הועתק ללוח. ניתן להדביק אותו בעורך ה-SQL של Supabase.</p>
+                )}
+                {copyStatus === 'error' && (
+                  <p className="text-xs text-destructive">
+                    לא הצלחנו להעתיק אוטומטית את הסקריפט. העתיקו ידנית את הטקסט המלא למטה.
+                  </p>
+                )}
+                <ol className="list-decimal space-y-1 rounded-md border border-dashed border-muted-foreground/40 bg-muted/40 p-3 text-right text-sm">
+                  <li>לחצו על "העתקת הסקריפט" כדי לשמור אותו בלוח.</li>
+                  <li>היכנסו ל-Supabase &gt; SQL Editor בפרויקט של הארגון.</li>
+                  <li>הדביקו את הסקריפט והפעילו אותו. לאחר מכן חזרו לכאן ולחצו על "הרצתי את הסקריפט — נסו שוב".</li>
+                </ol>
+                <pre className="overflow-x-auto whitespace-pre rounded-md border border-muted-foreground/30 bg-background p-3 text-left text-xs ltr" dir="ltr">
+                  <code>{DATABASE_PREPARATION_SQL}</code>
+                </pre>
+                <TechnicalDetails details={preparationDetails} />
+              </section>
+            )}
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
