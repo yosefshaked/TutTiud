@@ -393,13 +393,13 @@ export const SetupWizardPage = () => {
                   <div className="flex flex-col gap-0.5 text-right">
                     <dt className="font-semibold text-foreground">Supabase URL</dt>
                     <dd className="truncate text-left" dir="ltr">
-                      {organizationSettings.supabase_project_url ?? 'לא הוגדר'}
+                      {organizationSettings.supabase_url ?? 'לא הוגדר'}
                     </dd>
                   </div>
                   <div className="flex flex-col gap-0.5 text-right">
                     <dt className="font-semibold text-foreground">מפתח גישה ציבורי (Anon Key)</dt>
                     <dd className="text-left" dir="ltr">
-                      {organizationSettings.supabase_anon_public
+                      {organizationSettings.anon_key
                         ? '✓ מוגדר (מוסתר לביטחון)'
                         : 'לא הוגדר'}
                     </dd>

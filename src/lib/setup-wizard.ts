@@ -17,8 +17,8 @@ export type OrganizationSetupMetadata = {
 
 export type OrganizationSetupSettings = {
   org_id: string | null
-  supabase_project_url: string | null
-  supabase_anon_public: string | null
+  supabase_url: string | null
+  anon_key: string | null
   last_synced_at: string | null
   metadata: OrganizationSetupMetadata
 }
@@ -134,8 +134,8 @@ const normaliseSqlSnippets = (sql: unknown): DiagnosticsSqlSnippet[] => {
 
 type OrgSettingsRow = {
   org_id?: string | null
-  supabase_project_url?: string | null
-  supabase_anon_public?: string | null
+  supabase_url?: string | null
+  anon_key?: string | null
   last_synced_at?: string | null
   metadata?: Record<string, unknown> | null
 }
@@ -184,7 +184,7 @@ export const fetchOrganizationSetupSettings = async (
     const response = await client
       .from('org_settings')
       .select(
-        'org_id, supabase_project_url, supabase_anon_public, last_synced_at, metadata'
+        'org_id, supabase_url, anon_key, last_synced_at, metadata'
       )
       .eq('org_id', orgId)
       .maybeSingle()
@@ -206,8 +206,8 @@ export const fetchOrganizationSetupSettings = async (
 
     return {
       org_id: normalizedOrgId,
-      supabase_project_url: payload.supabase_project_url ?? null,
-      supabase_anon_public: payload.supabase_anon_public ?? null,
+      supabase_url: payload.supabase_url ?? null,
+      anon_key: payload.anon_key ?? null,
       last_synced_at: payload.last_synced_at ?? null,
       metadata: normaliseMetadata(payload.metadata)
     }
