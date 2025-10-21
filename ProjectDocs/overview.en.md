@@ -10,6 +10,7 @@ TutTiud is a multi-tenant SaaS platform built for health and wellbeing organizat
 - Authentication and organization context providers prepared for future integration with the Control DB.
 - Routing guards enforcing authentication and organization selection before accessing protected screens.
 - Interactive Setup Wizard page that orchestrates Supabase RPC steps for initialization, schema bootstrap, and diagnostics with Hebrew messaging.
+- Organization selector now inspects `org_settings.metadata.connections.tuttiud` to route users either back to their intended screen or into the Setup Wizard, and the wizard marks the connection as `"connected"` when all checks succeed.
 
 ## Next Steps (High-level)
 

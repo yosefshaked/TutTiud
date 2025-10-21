@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
@@ -14,7 +14,8 @@ import {
   type DiagnosticsSqlSnippet,
   type OrganizationSetupSettings,
   type SetupDiagnostics,
-  type SetupWizardError
+  type SetupWizardError,
+  updateTuttiudConnectionStatus
 } from '@/lib/setup-wizard'
 
 const statusLabel = {
@@ -95,6 +96,9 @@ export const SetupWizardPage = () => {
   const [refreshToken, setRefreshToken] = useState(0)
   const [organizationSettings, setOrganizationSettings] =
     useState<OrganizationSetupSettings | null>(null)
+  const [connectionUpdateState, setConnectionUpdateState] = useState<StepState>({
+    status: 'idle'
+  })
 
   const readyToStart = useMemo(
     () => clientAvailable && organizationStatus === 'ready' && Boolean(selectedOrganization),
@@ -111,6 +115,7 @@ export const SetupWizardPage = () => {
       setOrganizationSettings(null)
       setSchemaState({ status: 'idle', exists: null, lastBootstrappedAt: null })
       setDiagnosticsState({ status: 'idle', diagnostics: null })
+      setConnectionUpdateState({ status: 'idle' })
 
       try {
         const settings = await fetchOrganizationSetupSettings(orgId)
@@ -201,6 +206,84 @@ export const SetupWizardPage = () => {
     void runChecks()
   }, [readyToStart, selectedOrganization, refreshToken])
 
+  const runConnectionUpdate = useCallback(async () => {
+    if (!selectedOrganization || !organizationSettings) {
+      return
+    }
+
+    setConnectionUpdateState({
+      status: 'loading',
+      message: 'מעדכן את סטטוס החיבור של TutTiud...'
+    })
+
+    try {
+      const metadata = await updateTuttiudConnectionStatus(
+        selectedOrganization.org_id,
+        'connected',
+        organizationSettings.metadata.raw
+      )
+
+      setConnectionUpdateState({
+        status: 'success',
+        message: 'סטטוס החיבור עודכן למחובר.'
+      })
+
+      setOrganizationSettings((previous) => {
+        if (!previous) {
+          return previous
+        }
+
+        if (selectedOrganization && previous.org_id !== selectedOrganization.org_id) {
+          return previous
+        }
+
+        return {
+          ...previous,
+          metadata
+        }
+      })
+    } catch (error) {
+      const updateError = error as SetupWizardError
+      setConnectionUpdateState({
+        status: 'error',
+        message: 'עדכון סטטוס החיבור נכשל. אנא נסה שוב או פנה לתמיכה.',
+        error: updateError.cause ? String(updateError.cause) : undefined
+      })
+    }
+  }, [organizationSettings, selectedOrganization])
+
+  useEffect(() => {
+    if (
+      !selectedOrganization ||
+      !organizationSettings ||
+      organizationSettings.metadata.connections.tuttiud === 'connected'
+    ) {
+      return
+    }
+
+    const initSuccess = initState.status === 'success'
+    const schemaReady = schemaState.status === 'success' && schemaState.exists === true
+    const diagnosticsReady = diagnosticsState.status === 'success'
+
+    if (
+      initSuccess &&
+      schemaReady &&
+      diagnosticsReady &&
+      connectionUpdateState.status === 'idle'
+    ) {
+      void runConnectionUpdate()
+    }
+  }, [
+    connectionUpdateState.status,
+    diagnosticsState.status,
+    initState.status,
+    organizationSettings,
+    runConnectionUpdate,
+    schemaState.exists,
+    schemaState.status,
+    selectedOrganization
+  ])
+
   const handleCreateSchema = async () => {
     if (!selectedOrganization) return
 
@@ -235,6 +318,7 @@ export const SetupWizardPage = () => {
   const diagnosticsSeverity = diagnosticsState.diagnostics?.status ?? null
   const diagnosticsIssues = diagnosticsState.diagnostics?.issues ?? []
   const diagnosticsSql = diagnosticsState.diagnostics?.sqlSnippets ?? []
+  const isConnectionUpdateLoading = connectionUpdateState.status === 'loading'
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col gap-6 bg-muted/30 px-4 py-8">
@@ -291,7 +375,51 @@ export const SetupWizardPage = () => {
                         : 'טרם סונכרן'}
                     </dd>
                   </div>
+                  <div className="flex flex-col gap-0.5 text-right">
+                    <dt className="font-semibold text-foreground">סטטוס חיבור TutTiud</dt>
+                    <dd
+                      className={
+                        organizationSettings.metadata.connections.tuttiud === 'connected'
+                          ? 'text-emerald-600'
+                          : 'text-amber-600'
+                      }
+                    >
+                      {organizationSettings.metadata.connections.tuttiud === 'connected'
+                        ? 'מחובר'
+                        : 'דורש השלמה'}
+                    </dd>
+                  </div>
                 </dl>
+              )}
+              {connectionUpdateState.status === 'loading' && connectionUpdateState.message ? (
+                <p className="text-xs text-muted-foreground">{connectionUpdateState.message}</p>
+              ) : null}
+              {connectionUpdateState.status === 'success' && connectionUpdateState.message ? (
+                <p className="text-xs text-emerald-600">{connectionUpdateState.message}</p>
+              ) : null}
+              {connectionUpdateState.status === 'error' && (
+                <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-right text-xs">
+                  <p className="text-destructive">{connectionUpdateState.message}</p>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => runConnectionUpdate()}
+                      disabled={isConnectionUpdateLoading}
+                      type="button"
+                    >
+                      נסה שוב לעדכן סטטוס
+                    </Button>
+                    {connectionUpdateState.error ? (
+                      <pre
+                        className="max-h-24 w-full overflow-y-auto rounded-md bg-background/70 p-2 text-left text-[10px] text-muted-foreground"
+                        dir="ltr"
+                      >
+                        {connectionUpdateState.error}
+                      </pre>
+                    ) : null}
+                  </div>
+                </div>
               )}
               {initState.error && (
                 <pre className="max-h-32 overflow-y-auto rounded-md bg-destructive/10 p-3 text-left text-xs text-destructive" dir="ltr">

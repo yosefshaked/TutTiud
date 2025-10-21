@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate, type Location } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -7,9 +7,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuth } from '@/app/providers/auth-provider'
 import { useOrganization } from '@/app/providers/organization-provider'
 import { cn } from '@/lib/utils'
+import { fetchOrganizationSetupSettings } from '@/lib/setup-wizard'
+
+type SelectorLocationState = {
+  from?: Location
+}
 
 export const OrganizationSelectorPage = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { status: authStatus } = useAuth()
   const {
     memberships,
@@ -19,6 +25,59 @@ export const OrganizationSelectorPage = () => {
     error,
     refresh
   } = useOrganization()
+  const [isCheckingSetup, setIsCheckingSetup] = useState(false)
+  const [setupCheckError, setSetupCheckError] = useState<string | null>(null)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
+  const fallbackDestination = useMemo(() => {
+    const fromLocation = (location.state as SelectorLocationState | null)?.from
+    if (!fromLocation) {
+      return '/'
+    }
+    const pathname = fromLocation.pathname ?? '/'
+    const search = fromLocation.search ?? ''
+    const hash = fromLocation.hash ?? ''
+    return `${pathname}${search}${hash}`
+  }, [location.state])
+
+  const goToNextRoute = useCallback(
+    async (replace: boolean) => {
+      if (!selectedOrganization) {
+        return
+      }
+
+      if (isMountedRef.current) {
+        setIsCheckingSetup(true)
+        setSetupCheckError(null)
+      }
+
+      try {
+        const settings = await fetchOrganizationSetupSettings(selectedOrganization.org_id)
+        const tuttiudStatus = settings?.metadata.connections.tuttiud ?? null
+        const destination =
+          tuttiudStatus === 'connected' ? fallbackDestination : '/setup-wizard'
+
+        navigate(destination, { replace })
+      } catch (routingError) {
+        console.error('Failed to evaluate organization setup status', routingError)
+        if (isMountedRef.current) {
+          setSetupCheckError('שגיאה בבדיקת סטטוס ההגדרות. מועבר לאשף ההקמה כברירת מחדל.')
+        }
+        navigate('/setup-wizard', { replace })
+      } finally {
+        if (isMountedRef.current) {
+          setIsCheckingSetup(false)
+        }
+      }
+    },
+    [fallbackDestination, navigate, selectedOrganization]
+  )
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') {
@@ -28,9 +87,9 @@ export const OrganizationSelectorPage = () => {
 
   useEffect(() => {
     if (status === 'ready' && selectedOrganization) {
-      navigate('/', { replace: true })
+      void goToNextRoute(true)
     }
-  }, [navigate, selectedOrganization, status])
+  }, [goToNextRoute, selectedOrganization, status])
 
   if (status === 'loading') {
     return (
@@ -48,6 +107,12 @@ export const OrganizationSelectorPage = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {setupCheckError ? (
+            <p className="text-sm text-destructive">{setupCheckError}</p>
+          ) : null}
+          {isCheckingSetup ? (
+            <p className="text-sm text-muted-foreground">בודק את סטטוס הגדרות הארגון…</p>
+          ) : null}
           {status === 'empty' ? (
             <p className="text-sm text-muted-foreground">
               לא נמצאו ארגונים משויכים למשתמש זה. אנא פנה למנהל המערכת.
@@ -84,7 +149,11 @@ export const OrganizationSelectorPage = () => {
             <Button onClick={() => navigate(-1)} variant="secondary" type="button">
               חזרה
             </Button>
-            <Button disabled={!selectedOrganization} onClick={() => navigate('/')} type="button">
+            <Button
+              disabled={!selectedOrganization || isCheckingSetup}
+              onClick={() => void goToNextRoute(false)}
+              type="button"
+            >
               המשך ללוח הבקרה
             </Button>
           </div>

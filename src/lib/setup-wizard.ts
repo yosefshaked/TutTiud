@@ -1,10 +1,26 @@
 import { supabaseClient } from './supabase-client'
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+export type TuttiudConnectionStatus = 'connected' | (string & {}) | null
+
+export type OrganizationConnectionsMetadata = {
+  tuttiud: TuttiudConnectionStatus
+  [key: string]: unknown
+}
+
+export type OrganizationSetupMetadata = {
+  connections: OrganizationConnectionsMetadata
+  raw: Record<string, unknown>
+}
+
 export type OrganizationSetupSettings = {
   org_id: string | null
   supabase_project_url: string | null
   supabase_anon_public: string | null
   last_synced_at: string | null
+  metadata: OrganizationSetupMetadata
 }
 
 export type SetupStepStatus = 'idle' | 'loading' | 'success' | 'error'
@@ -121,6 +137,44 @@ type OrgSettingsRow = {
   supabase_project_url?: string | null
   supabase_anon_public?: string | null
   last_synced_at?: string | null
+  metadata?: Record<string, unknown> | null
+}
+
+const normaliseMetadata = (
+  metadata: OrgSettingsRow['metadata']
+): OrganizationSetupMetadata => {
+  if (!isRecord(metadata)) {
+    return {
+      connections: {
+        tuttiud: null
+      },
+      raw: {}
+    }
+  }
+
+  const connectionsSource = isRecord(metadata.connections)
+    ? (metadata.connections as Record<string, unknown>)
+    : {}
+
+  const tuttiudValue = connectionsSource.tuttiud
+  const normalizedTuttiud: TuttiudConnectionStatus =
+    typeof tuttiudValue === 'string' ? (tuttiudValue as TuttiudConnectionStatus) : null
+
+  const normalizedConnections: OrganizationConnectionsMetadata = {
+    ...connectionsSource,
+    tuttiud: normalizedTuttiud
+  }
+
+  return {
+    connections: normalizedConnections,
+    raw: {
+      ...metadata,
+      connections: {
+        ...connectionsSource,
+        tuttiud: normalizedTuttiud
+      }
+    }
+  }
 }
 
 export const fetchOrganizationSetupSettings = async (
@@ -130,7 +184,7 @@ export const fetchOrganizationSetupSettings = async (
     const response = await client
       .from('org_settings')
       .select(
-        'org_id, supabase_project_url, supabase_anon_public, last_synced_at'
+        'org_id, supabase_project_url, supabase_anon_public, last_synced_at, metadata'
       )
       .eq('org_id', orgId)
       .maybeSingle()
@@ -154,8 +208,43 @@ export const fetchOrganizationSetupSettings = async (
       org_id: normalizedOrgId,
       supabase_project_url: payload.supabase_project_url ?? null,
       supabase_anon_public: payload.supabase_anon_public ?? null,
-      last_synced_at: payload.last_synced_at ?? null
+      last_synced_at: payload.last_synced_at ?? null,
+      metadata: normaliseMetadata(payload.metadata)
     }
+  })
+
+export const updateTuttiudConnectionStatus = async (
+  orgId: string,
+  status: Exclude<TuttiudConnectionStatus, null>,
+  options?: { currentMetadata?: Record<string, unknown> | null }
+): Promise<OrganizationSetupMetadata> =>
+  withClient(async (client) => {
+    const current = normaliseMetadata(options?.currentMetadata ?? null)
+    const existingConnections = isRecord(current.raw.connections)
+      ? (current.raw.connections as Record<string, unknown>)
+      : {}
+
+    const nextRaw: Record<string, unknown> = {
+      ...current.raw,
+      connections: {
+        ...existingConnections,
+        tuttiud: status
+      }
+    }
+
+    const { error } = await client
+      .from('org_settings')
+      .update({ metadata: nextRaw })
+      .eq('org_id', orgId)
+
+    if (error) {
+      throw {
+        message: 'עדכון סטטוס החיבור של TutTiud נכשל. אנא נסה שוב מאוחר יותר.',
+        cause: error
+      } satisfies SetupWizardError
+    }
+
+    return normaliseMetadata(nextRaw)
   })
 
 export const initializeSetupForOrganization = async (
