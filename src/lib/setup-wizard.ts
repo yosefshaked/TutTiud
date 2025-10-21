@@ -54,7 +54,7 @@ export type SetupWizardError = {
 }
 
 const errorForMissingClient: SetupWizardError = {
-  message: 'Supabase client is not configured. אנא ודא שהוגדרו משתני הסביבה המתאימים.'
+  message: 'לא הצלחנו להתחבר ל-Supabase. רעננו את הדפדפן או צרו קשר עם התמיכה.'
 }
 
 const withClient = <T,>(
@@ -191,7 +191,7 @@ export const fetchOrganizationSetupSettings = async (
 
     if (response.error) {
       throw {
-        message: 'טעינת הגדרות הארגון נכשלה. אנא נסה שוב מאוחר יותר.',
+        message: 'לא הצלחנו לטעון את הגדרות החיבור. נסו שוב בעוד רגע.',
         cause: response.error
       } satisfies SetupWizardError
     }
@@ -270,13 +270,13 @@ export const initializeSetupForOrganization = async (
       if (isPostgrestMissingFunction(error)) {
         throw {
           message:
-            'פונקציית setup_assistant_initialize אינה זמינה ב-Supabase. אנא פרוס את הפונקציה ונסה שוב.',
+            'תהליך ההתחלה של TutTiud לא הותקן ב-Supabase. אנא פרסו את ההרחבות הנדרשות ונסו שוב.',
           cause: error
         } satisfies SetupWizardError
       }
 
       throw {
-        message: 'התחברות ל-Supabase נכשלה. אנא בדוק את ההרשאות ונסה שוב.',
+        message: 'לא הצלחנו להתחבר למסד הנתונים. בדקו את פרטי ההתחברות ונסו שוב.',
         cause: error
       } satisfies SetupWizardError
     }
@@ -307,13 +307,13 @@ export const checkSchemaStatus = async (
       if (isPostgrestMissingFunction(error)) {
         throw {
           message:
-            'פונקציית setup_assistant_schema_status אינה זמינה. יש לפרוס אותה או לעדכן את סביבת Supabase.',
+            'בדיקות מבנה הנתונים של TutTiud לא הותקנו ב-Supabase. אנא עדכנו את סביבת Supabase ונסו שוב.',
           cause: error
         } satisfies SetupWizardError
       }
 
       throw {
-        message: 'בדיקת סכימת tuttiud נכשלה.',
+        message: 'לא הצלחנו לבדוק את מבנה הנתונים של TutTiud. נסו שוב בעוד רגע.',
         cause: error
       } satisfies SetupWizardError
     }
@@ -342,13 +342,13 @@ export const runSchemaBootstrap = async (
       if (isPostgrestMissingFunction(error)) {
         throw {
           message:
-            'פונקציית setup_assistant_run_bootstrap אינה זמינה. אנא פרוס את סקריפט ההקמה ונסה שוב.',
+            'תהליך ההקמה של TutTiud לא הותקן ב-Supabase. אנא פרסו את סקריפט ההקמה ונסו שוב.',
           cause: error
         } satisfies SetupWizardError
       }
 
       throw {
-        message: 'יצירת סכימת tuttiud נכשלה.',
+        message: 'לא הצלחנו ליצור את מבנה הנתונים של TutTiud. בדקו את ההרשאות במסד הנתונים ונסו שוב.',
         cause: error
       } satisfies SetupWizardError
     }

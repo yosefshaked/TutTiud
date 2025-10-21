@@ -26,6 +26,40 @@ const statusLabel = {
   error: 'שגיאה'
 } as const
 
+const issueTypeLabel: Record<string, string> = {
+  table: 'טבלאות שחסרות',
+  policy: 'מדיניות חסרה',
+  permission: 'הרשאות חסרות',
+  other: 'פריטים נוספים'
+}
+
+const formatTechnicalDetails = (cause: unknown): string | null => {
+  if (!cause) return null
+  if (cause instanceof Error) {
+    return cause.stack ?? cause.message
+  }
+  if (typeof cause === 'string') {
+    return cause
+  }
+  try {
+    return JSON.stringify(cause, null, 2)
+  } catch {
+    return String(cause)
+  }
+}
+
+const TechnicalDetails = ({ details }: { details: string | null | undefined }) => {
+  if (!details) return null
+  return (
+    <details className="rounded-md border border-muted-foreground/30 bg-muted/20 p-3 text-xs text-muted-foreground" dir="ltr">
+      <summary className="cursor-pointer text-right text-sm font-semibold" dir="rtl">
+        פרטים טכניים לצוות התמיכה
+      </summary>
+      <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-left">{details}</pre>
+    </details>
+  )
+}
+
 type StepState = {
   status: keyof typeof statusLabel
   message?: string
@@ -63,7 +97,10 @@ const DiagnosticsSqlList = ({ snippets }: { snippets: DiagnosticsSqlSnippet[] })
   if (!snippets.length) return null
   return (
     <div className="space-y-2 rounded-lg border border-dashed border-muted-foreground/30 bg-muted/40 p-4 text-sm">
-      <p className="font-medium text-muted-foreground">פקודות SQL מומלצות</p>
+      <p className="font-medium text-muted-foreground">הנחיות נוספות לצוות הטכני</p>
+      <p className="text-xs text-muted-foreground">
+        אם אתם עובדים עם צוות תמיכה טכני, ניתן למסור לו את ההוראות הבאות לביצוע ב-SQL.
+      </p>
       <div className="space-y-3">
         {snippets.map((snippet, index) => (
           <div key={`${snippet.title}-${index}`} className="space-y-1">
@@ -123,7 +160,7 @@ export const SetupWizardPage = () => {
         if (!settings) {
           setInitState({
             status: 'warning',
-            message: 'לא נמצאו הגדרות org_settings עבור הארגון. אנא פנה לתמיכה.'
+            message: 'לא הצלחנו למצוא את הגדרות החיבור של הארגון. אנא צרו קשר עם התמיכה של TutTiud.'
           })
           return
         }
@@ -134,8 +171,8 @@ export const SetupWizardPage = () => {
           message:
             initResult.message ??
             (initResult.initialized
-              ? 'ההתחברות ל-Supabase הושלמה בהצלחה.'
-              : 'ההתחברות ל-Supabase נכשלה.')
+              ? 'התחברנו למסד הנתונים בהצלחה.'
+              : 'לא הצלחנו להתחבר למסד הנתונים. בדקו את ההגדרות ונסו שוב.')
         })
         if (!initResult.initialized) {
           return
@@ -145,7 +182,7 @@ export const SetupWizardPage = () => {
         setInitState({
           status: 'error',
           message: setupError.message,
-          error: setupError.cause ? String(setupError.cause) : undefined
+          error: formatTechnicalDetails(setupError.cause)
         })
         return
       }
@@ -158,8 +195,8 @@ export const SetupWizardPage = () => {
           exists: schemaResult.exists,
           lastBootstrappedAt: schemaResult.lastBootstrappedAt,
           message: schemaResult.exists
-            ? 'סכימת tuttiud קיימת ומוכנה.'
-            : 'סכימת tuttiud טרם נוצרה.'
+            ? 'מבנה הנתונים של TutTiud זמין ומוכן.'
+            : 'מבנה הנתונים של TutTiud עדיין לא נוצר.'
         })
         if (!schemaResult.exists) {
           setDiagnosticsState({ status: 'idle', diagnostics: null })
@@ -172,7 +209,7 @@ export const SetupWizardPage = () => {
           exists: null,
           lastBootstrappedAt: null,
           message: schemaError.message,
-          error: schemaError.cause ? String(schemaError.cause) : undefined
+          error: formatTechnicalDetails(schemaError.cause)
         })
         return
       }
@@ -198,7 +235,7 @@ export const SetupWizardPage = () => {
           status: 'error',
           diagnostics: null,
           message: diagnosticsError.message,
-          error: diagnosticsError.cause ? String(diagnosticsError.cause) : undefined
+          error: formatTechnicalDetails(diagnosticsError.cause)
         })
       }
     }
@@ -220,12 +257,12 @@ export const SetupWizardPage = () => {
       const metadata = await updateTuttiudConnectionStatus(
         selectedOrganization.org_id,
         'connected',
-        organizationSettings.metadata.raw
+        { currentMetadata: organizationSettings.metadata.raw }
       )
 
       setConnectionUpdateState({
         status: 'success',
-        message: 'סטטוס החיבור עודכן למחובר.'
+        message: 'סימנו שההגדרות הושלמו והחיבור פעיל.'
       })
 
       setOrganizationSettings((previous) => {
@@ -246,8 +283,8 @@ export const SetupWizardPage = () => {
       const updateError = error as SetupWizardError
       setConnectionUpdateState({
         status: 'error',
-        message: 'עדכון סטטוס החיבור נכשל. אנא נסה שוב או פנה לתמיכה.',
-        error: updateError.cause ? String(updateError.cause) : undefined
+        message: 'לא הצלחנו לעדכן את סטטוס החיבור. נסו שוב ואם הבעיה נמשכת פנו לתמיכה.',
+        error: formatTechnicalDetails(updateError.cause)
       })
     }
   }, [organizationSettings, selectedOrganization])
@@ -297,8 +334,8 @@ export const SetupWizardPage = () => {
         message:
           result.message ??
           (result.executed
-            ? 'סכימת tuttiud נוצרה בהצלחה.'
-            : 'יצירת הסכמה נכשלה. אנא בדוק את ההרשאות.')
+            ? 'מבנה הנתונים של TutTiud נוצר בהצלחה.'
+            : 'לא הצלחנו ליצור את מבנה הנתונים. בדקו את ההרשאות במסד הנתונים ונסו שוב.')
       })
       if (result.executed) {
         setRefreshToken((value) => value + 1)
@@ -310,7 +347,7 @@ export const SetupWizardPage = () => {
         exists: null,
         lastBootstrappedAt: null,
         message: bootstrapError.message,
-        error: bootstrapError.cause ? String(bootstrapError.cause) : undefined
+        error: formatTechnicalDetails(bootstrapError.cause)
       })
     }
   }
@@ -325,7 +362,7 @@ export const SetupWizardPage = () => {
       <header className="text-right">
         <h1 className="text-3xl font-bold">אשף ההקמה של TutTiud</h1>
         <p className="mt-2 text-muted-foreground">
-          האשף יסייע לך לוודא שהסכמה tuttiud הוקמה כהלכה ותאפשר כניסה חלקה למערכת.
+          האשף יסייע לך לוודא שהחיבור למסד הנתונים הושלם שהמערכת מוכנה לשימוש.
         </p>
       </header>
 
@@ -341,9 +378,9 @@ export const SetupWizardPage = () => {
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 1 — התחברות ל-Supabase</h2>
+                  <h2 className="text-lg font-semibold">שלב 1 — בדיקת החיבור למסד הנתונים</h2>
                   <p className="text-sm text-muted-foreground">
-                    טעינת התצורה מטבלת org_settings והרצת התחברות אוטומטית.
+                    אנו טוענים את פרטי ההתחברות ובודקים שניתן להתחבר למסד הנתונים של TutTiud.
                   </p>
                 </div>
                 <StepStatusBadge state={initState} />
@@ -360,7 +397,7 @@ export const SetupWizardPage = () => {
                     </dd>
                   </div>
                   <div className="flex flex-col gap-0.5 text-right">
-                    <dt className="font-semibold text-foreground">Anon Key</dt>
+                    <dt className="font-semibold text-foreground">מפתח גישה ציבורי (Anon Key)</dt>
                     <dd className="text-left" dir="ltr">
                       {organizationSettings.supabase_anon_public
                         ? '✓ מוגדר (מוסתר לביטחון)'
@@ -408,32 +445,21 @@ export const SetupWizardPage = () => {
                       disabled={isConnectionUpdateLoading}
                       type="button"
                     >
-                      נסה שוב לעדכן סטטוס
+                      נסו שוב לעדכן סטטוס
                     </Button>
-                    {connectionUpdateState.error ? (
-                      <pre
-                        className="max-h-24 w-full overflow-y-auto rounded-md bg-background/70 p-2 text-left text-[10px] text-muted-foreground"
-                        dir="ltr"
-                      >
-                        {connectionUpdateState.error}
-                      </pre>
-                    ) : null}
+                    <TechnicalDetails details={connectionUpdateState.error} />
                   </div>
                 </div>
               )}
-              {initState.error && (
-                <pre className="max-h-32 overflow-y-auto rounded-md bg-destructive/10 p-3 text-left text-xs text-destructive" dir="ltr">
-                  {initState.error}
-                </pre>
-              )}
+              <TechnicalDetails details={initState.error} />
             </section>
 
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 2 — בדיקת סכימת tuttiud</h2>
+                  <h2 className="text-lg font-semibold">שלב 2 — אימות מבנה הנתונים</h2>
                   <p className="text-sm text-muted-foreground">
-                    אימות קיום הסכמה, טבלאות ברירת המחדל ומועד יצירתה האחרון.
+                    בודקים שהטבלאות וההרשאות של TutTiud קיימות ומעודכנות.
                   </p>
                 </div>
                 <StepStatusBadge state={schemaState} />
@@ -447,17 +473,15 @@ export const SetupWizardPage = () => {
                 </p>
               )}
               {schemaState.error && (
-                <pre className="max-h-32 overflow-y-auto rounded-md bg-destructive/10 p-3 text-left text-xs text-destructive" dir="ltr">
-                  {schemaState.error}
-                </pre>
+                <TechnicalDetails details={schemaState.error} />
               )}
               {schemaState.status === 'success' && schemaState.exists === false && (
                 <div className="flex flex-col items-end justify-between gap-3 rounded-md border border-dashed border-primary/40 bg-primary/5 p-4 text-sm">
                   <p>
-                    הסכמה לא קיימת. לחץ על הכפתור כדי להריץ את סקריפט האתחול המלא (SQL) דרך Supabase.
+                    נראה שמבנה הנתונים עדיין לא הוגדר. לחצו על הכפתור כדי להפעיל את תהליך ההקמה האוטומטי.
                   </p>
                   <Button onClick={handleCreateSchema}>
-                    צור סכימת tuttiud
+                    צרו את מבנה הנתונים של TutTiud
                   </Button>
                 </div>
               )}
@@ -466,9 +490,9 @@ export const SetupWizardPage = () => {
             <section className="space-y-3 rounded-lg border border-muted-foreground/30 bg-background/80 p-4">
               <header className="flex items-center justify-between">
                 <div className="text-right">
-                  <h2 className="text-lg font-semibold">שלב 3 — אבחון אבטחה ותשתית</h2>
+                  <h2 className="text-lg font-semibold">שלב 3 — בדיקות אחרונות</h2>
                   <p className="text-sm text-muted-foreground">
-                    הרצת setup_assistant_diagnostics() לזיהוי טבלאות או מדיניות חסרות.
+                    מריצים בדיקות כדי לוודא שהכל מוכן לעבודה ושאין הרשאות חסרות.
                   </p>
                 </div>
                 <StepStatusBadge state={diagnosticsState} />
@@ -477,9 +501,7 @@ export const SetupWizardPage = () => {
                 <p className="text-sm text-muted-foreground">{diagnosticsState.message}</p>
               )}
               {diagnosticsState.error && (
-                <pre className="max-h-32 overflow-y-auto rounded-md bg-destructive/10 p-3 text-left text-xs text-destructive" dir="ltr">
-                  {diagnosticsState.error}
-                </pre>
+                <TechnicalDetails details={diagnosticsState.error} />
               )}
 
               {diagnosticsState.status === 'success' && diagnosticsState.diagnostics && (
@@ -516,7 +538,10 @@ export const SetupWizardPage = () => {
                             key={`${issue.type}-${index}-${issue.description}`}
                             className="rounded-md border border-dashed border-amber-400/50 bg-amber-100/40 p-3 text-amber-900"
                           >
-                            <span className="font-semibold">[{issue.type}]</span> {issue.description}
+                            <span className="font-semibold">
+                              {issueTypeLabel[issue.type] ?? 'פריט שדורש טיפול'}:
+                            </span>{' '}
+                            {issue.description}
                           </li>
                         ))}
                       </ul>
