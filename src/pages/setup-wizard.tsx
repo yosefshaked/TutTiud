@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
@@ -281,6 +281,7 @@ export const SetupWizardPage = () => {
   const [appKeyInput, setAppKeyInput] = useState('')
   const [appKeyState, setAppKeyState] = useState<StepState>({ status: 'idle' })
   const [validationTrigger, setValidationTrigger] = useState<'auto' | 'manual' | null>(null)
+  const lastSettingsFetchRef = useRef<{ orgId: string; refreshToken: number } | null>(null)
 
   const readyToStart = useMemo(
     () => clientAvailable && organizationStatus === 'ready' && Boolean(selectedOrganization),
@@ -373,6 +374,24 @@ export const SetupWizardPage = () => {
 
   useEffect(() => {
     if (!readyToStart || !selectedOrganization) return
+
+    // Prevent automatic browser focus events from re-triggering the fetch and
+    // resetting the wizard once we've already loaded the current organization.
+    const fetchKey = {
+      orgId: selectedOrganization.org_id,
+      refreshToken
+    }
+
+    const previousFetch = lastSettingsFetchRef.current
+    if (
+      previousFetch &&
+      previousFetch.orgId === fetchKey.orgId &&
+      previousFetch.refreshToken === fetchKey.refreshToken
+    ) {
+      return
+    }
+
+    lastSettingsFetchRef.current = fetchKey
 
     let isActive = true
     const orgId = selectedOrganization.org_id
